@@ -102,7 +102,7 @@ export default function Home() {
           )}
           {currentStep === 3 && (
             <motion.div key="step3">
-              <StepEditor onNext={handleEditorNext} />
+              <StepEditor file={uploadedFile} onNext={handleEditorNext} />
             </motion.div>
           )}
           {currentStep === 4 && (
