@@ -20,6 +20,15 @@ export interface Subtitle {
   text: string;
 }
 
+/** Word-level timestamp entry (Whisper / Deepgram format) */
+export interface Word {
+  id: string;
+  text: string;
+  start: number;  // seconds
+  end: number;    // seconds
+  confidence: number; // 0–1
+}
+
 // ─── State ──────────────────────────────────────────────────────────────────────
 
 export interface EditorState {
@@ -27,6 +36,7 @@ export interface EditorState {
   duration: number;
   clips: Clip[];
   subtitles: Subtitle[];
+  transcript: Word[];
   selectedTrack: string;
   videoVolume: number;
   musicVolume: number;
@@ -39,6 +49,7 @@ export type EditorAction =
   | { type: "SET_DURATION"; duration: number }
   | { type: "INIT_CLIPS"; clips: Clip[] }
   | { type: "INIT_SUBTITLES"; subtitles: Subtitle[] }
+  | { type: "SET_TRANSCRIPT"; words: Word[] }
   | { type: "SPLIT_CLIP"; atTime: number }
   | { type: "REMOVE_CLIP"; id: string }
   | { type: "UPDATE_SUBTITLE"; id: string; text: string }
@@ -61,6 +72,55 @@ export const CLIP_COLORS = [
 ];
 
 const CLIP_LABELS = ["פתיחה", "תוכן ראשי", "חלק שני", "שיא", "סיכום", "סיום"];
+
+// ─── Word transcript generator ───────────────────────────────────────────────
+
+const TRANSCRIPT_VOCAB = [
+  "שלום", "ברוכים", "הבאים", "לסרטון", "שלי",
+  "היום", "אנחנו", "הולכים", "לדבר", "על",
+  "הנושא", "הכי", "חם", "של", "השנה",
+  "זה", "חשוב", "מאוד", "כי", "ישנה",
+  "את", "החיים", "שלכם", "לגמרי",
+  "בואו", "נתחיל", "עם", "הדבר", "הראשון",
+  "שצריך", "לדעת", "הוא", "שהתהליך",
+  "שלנו", "עובד", "בצורה", "שונה",
+  "תוצאות", "מדהימות", "מחכות", "לכם",
+  "אל", "תפספסו", "את", "ההזדמנות",
+  "לייק", "ותעקבו", "לתוכן", "נוסף",
+];
+
+/**
+ * Generates a realistic word-level timestamp array for `duration` seconds.
+ * Suitable for Whisper Large V3 / Deepgram-style karaoke highlighting.
+ */
+export function generateWordTranscript(duration: number): Word[] {
+  const dur = duration > 0 ? duration : 60;
+  const words: Word[] = [];
+  let t = 0.15;
+
+  for (let idx = 0; t < dur - 0.3; idx++) {
+    const wordText = TRANSCRIPT_VOCAB[idx % TRANSCRIPT_VOCAB.length];
+    const wordDur = 0.2 + Math.random() * 0.45;
+    const end = parseFloat(Math.min(t + wordDur, dur - 0.1).toFixed(3));
+    // Natural pauses after every ~5-7 words
+    const isBreath = idx > 0 && idx % (5 + Math.floor(Math.random() * 3)) === 0;
+    const gap = isBreath
+      ? 0.35 + Math.random() * 0.65   // inter-phrase pause
+      : 0.03 + Math.random() * 0.10;  // normal inter-word gap
+
+    words.push({
+      id: `w${idx}`,
+      text: wordText,
+      start: parseFloat(t.toFixed(3)),
+      end,
+      confidence: parseFloat((0.91 + Math.random() * 0.09).toFixed(3)),
+    });
+
+    t = end + gap;
+  }
+
+  return words;
+}
 
 const SUBTITLE_PHRASES = [
   "שלום!",
@@ -130,6 +190,7 @@ const INITIAL: EditorState = {
   duration: 0,
   clips: [],
   subtitles: [],
+  transcript: [],
   selectedTrack: "t1",
   videoVolume: 80,
   musicVolume: 40,
@@ -145,6 +206,8 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       return state.clips.length > 0 ? state : { ...state, clips: action.clips };
     case "INIT_SUBTITLES":
       return state.subtitles.length > 0 ? state : { ...state, subtitles: action.subtitles };
+    case "SET_TRANSCRIPT":
+      return { ...state, transcript: action.words };
     case "SPLIT_CLIP": {
       const t = action.atTime;
       const idx = state.clips.findIndex(c => t > c.startSec + 0.15 && t < c.endSec - 0.15);
