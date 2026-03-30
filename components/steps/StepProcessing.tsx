@@ -111,6 +111,7 @@ export default function StepProcessing({ fileName, onComplete, onBack }: Props) 
   const [confidence, setConfidence] = useState(0);
 
   const transcriptFired = useRef(false);
+  const completionFired = useRef(false);
   const currentPhase = getPhaseN(progress);
   const phaseConfig = PHASES[currentPhase - 1];
 
@@ -134,14 +135,16 @@ export default function StepProcessing({ fileName, onComplete, onBack }: Props) 
     return () => clearInterval(iv);
   }, [done]);
 
-  // Completion trigger
+  // Completion trigger — ref-guarded so React's effect cleanup on `done`
+  // state change doesn't cancel the timeout before it fires.
   useEffect(() => {
-    if (progress >= 100 && !done) {
+    if (progress >= 100 && !completionFired.current) {
+      completionFired.current = true;
       setDone(true);
-      const t = setTimeout(onComplete, 1200);
+      const t = setTimeout(onComplete, 1500);
       return () => clearTimeout(t);
     }
-  }, [progress, done, onComplete]);
+  }, [progress, onComplete]); // intentionally excludes `done` to prevent cleanup race
 
   // Phase-2 live stats (word count, confidence, word stream)
   useEffect(() => {
