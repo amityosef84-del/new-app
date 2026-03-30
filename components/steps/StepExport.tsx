@@ -11,10 +11,12 @@ import {
   CheckCircle,
   Loader,
   Send,
+  ChevronRight,
 } from "lucide-react";
 
 interface StepExportProps {
   onReset: () => void;
+  onBack?: () => void;
 }
 
 type ThumbnailState = "idle" | "generating" | "done";
@@ -27,7 +29,7 @@ const THUMBNAIL_SUGGESTIONS = [
   "רקע כהה עם כותרת בולטת",
 ];
 
-export default function StepExport({ onReset }: StepExportProps) {
+export default function StepExport({ onReset, onBack }: StepExportProps) {
   const [prompt, setPrompt] = useState("");
   const [thumbnailState, setThumbnailState] = useState<ThumbnailState>("idle");
   const [exportState, setExportState] = useState<ExportState>("idle");
@@ -57,6 +59,19 @@ export default function StepExport({ onReset }: StepExportProps) {
       transition={{ duration: 0.4, ease: "easeOut" }}
       className="flex flex-col gap-8 w-full max-w-2xl mx-auto"
     >
+      {/* Back button */}
+      {onBack && (
+        <div className="self-start">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-white/35 hover:text-white/70 transition-colors text-sm"
+          >
+            <ChevronRight size={16} />
+            חזור לעריכה
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="text-center">
         <h2 className="text-3xl font-bold gradient-text mb-2">טאבנייל וייצוא</h2>

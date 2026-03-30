@@ -5,18 +5,21 @@ import { AnimatePresence, motion } from "framer-motion";
 import Stepper from "@/components/Stepper";
 import StepUpload from "@/components/steps/StepUpload";
 import StepProcessing from "@/components/steps/StepProcessing";
-import StepEditor from "@/components/steps/StepEditor";
 import StepExport from "@/components/steps/StepExport";
+import EditorShell from "@/components/editor/EditorShell";
+import { EditorProvider, useEditor } from "@/context/EditorContext";
 import { Sparkles } from "lucide-react";
 
-export default function Home() {
+function HomeInner() {
   const [currentStep, setCurrentStep] = useState(1);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const { dispatch } = useEditor();
 
   const handleUploadComplete = useCallback((file: File) => {
     setUploadedFile(file);
+    dispatch({ type: "SET_FILE", file });
     setCurrentStep(2);
-  }, []);
+  }, [dispatch]);
 
   const handleProcessingComplete = useCallback(() => {
     setCurrentStep(3);
@@ -29,7 +32,18 @@ export default function Home() {
   const handleReset = useCallback(() => {
     setCurrentStep(1);
     setUploadedFile(null);
-  }, []);
+    dispatch({ type: "RESET" });
+  }, [dispatch]);
+
+  // Step 3 is full-screen — no header/stepper/footer wrapper
+  if (currentStep === 3) {
+    return (
+      <EditorShell
+        onBack={() => setCurrentStep(2)}
+        onNext={handleEditorNext}
+      />
+    );
+  }
 
   return (
     <main className="relative min-h-screen flex flex-col">
@@ -97,17 +111,16 @@ export default function Home() {
               <StepProcessing
                 fileName={uploadedFile?.name}
                 onComplete={handleProcessingComplete}
+                onBack={() => setCurrentStep(1)}
               />
-            </motion.div>
-          )}
-          {currentStep === 3 && (
-            <motion.div key="step3">
-              <StepEditor file={uploadedFile} onNext={handleEditorNext} />
             </motion.div>
           )}
           {currentStep === 4 && (
             <motion.div key="step4">
-              <StepExport onReset={handleReset} />
+              <StepExport
+                onReset={handleReset}
+                onBack={() => setCurrentStep(3)}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -118,5 +131,13 @@ export default function Home() {
         <p className="text-white/15 text-xs">עורך וידאו AI • מבוסס בינה מלאכותית</p>
       </footer>
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <EditorProvider>
+      <HomeInner />
+    </EditorProvider>
   );
 }
