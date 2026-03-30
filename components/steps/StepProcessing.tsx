@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Cpu, Scissors, Music, CheckCircle } from "lucide-react";
+import { Cpu, Scissors, Music, CheckCircle, ChevronRight } from "lucide-react";
 
 interface ProcessingTask {
   id: string;
@@ -51,9 +51,10 @@ const TASKS: ProcessingTask[] = [
 interface StepProcessingProps {
   fileName?: string;
   onComplete: () => void;
+  onBack?: () => void;
 }
 
-export default function StepProcessing({ fileName, onComplete }: StepProcessingProps) {
+export default function StepProcessing({ fileName, onComplete, onBack }: StepProcessingProps) {
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
   const [completedTasks, setCompletedTasks] = useState<string[]>([]);
   const [taskProgress, setTaskProgress] = useState(0);
@@ -100,6 +101,19 @@ export default function StepProcessing({ fileName, onComplete }: StepProcessingP
       transition={{ duration: 0.4, ease: "easeOut" }}
       className="flex flex-col items-center gap-10 w-full max-w-2xl mx-auto"
     >
+      {/* Back button */}
+      {onBack && (
+        <div className="self-start">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-white/35 hover:text-white/70 transition-colors text-sm"
+          >
+            <ChevronRight size={16} />
+            חזור להעלאה
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="text-center">
         <h2 className="text-3xl font-bold gradient-text mb-2">עיבוד AI</h2>
