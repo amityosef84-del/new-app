@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAnimation } from "framer-motion";
 type AnimationControls = ReturnType<typeof useAnimation>;
@@ -9,7 +9,7 @@ import type { Subtitle, Word } from "@/context/EditorContext";
 
 // ─── Karaoke helper ──────────────────────────────────────────────────────────
 
-const KARAOKE_LINE_SIZE = 4; // words per display line
+const KARAOKE_LINE_SIZE = 4;
 
 function getKaraokeState(
   transcript: Word[],
@@ -17,12 +17,9 @@ function getKaraokeState(
 ): { lineWords: Word[]; activeId: string | null } {
   if (transcript.length === 0) return { lineWords: [], activeId: null };
 
-  // Find the word currently being spoken
   const activeIdx = transcript.findIndex(
     (w) => currentTime >= w.start && currentTime < w.end,
   );
-
-  // If between words, anchor to the last word that already ended
   const anchorIdx =
     activeIdx >= 0
       ? activeIdx
@@ -33,13 +30,10 @@ function getKaraokeState(
             0,
           ),
         );
-
-  // Line = group of KARAOKE_LINE_SIZE words containing the anchor
   const lineStart =
     Math.floor(anchorIdx / KARAOKE_LINE_SIZE) * KARAOKE_LINE_SIZE;
   const lineWords = transcript.slice(lineStart, lineStart + KARAOKE_LINE_SIZE);
   const activeId = activeIdx >= 0 ? transcript[activeIdx].id : null;
-
   return { lineWords, activeId };
 }
 
@@ -73,193 +67,245 @@ export default function VideoPreview({
   progress, onUnlock, onTogglePlay, onSeek,
   onLoadedMetadata, onTimeUpdate, onEnded, fmt,
 }: Props) {
-  // Prefer word-level karaoke when transcript is available;
-  // fall back to sentence-level subtitles for backward compatibility.
+
+  // ── Aspect ratio detected from the video's natural dimensions ──────────────
+  const [videoAspect, setVideoAspect] = useState<number | null>(null);
+
+  // ── Track the rendered height of the video box to scale subtitles ──────────
+  const videoBoxRef = useRef<HTMLDivElement>(null);
+  const [boxHeight, setBoxHeight] = useState(0);
+
+  useEffect(() => {
+    const el = videoBoxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      setBoxHeight(entries[0].contentRect.height);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Wrap the parent's onLoadedMetadata so we can read natural dimensions here
+  const handleLoadedMetadata = () => {
+    const v = videoRef.current;
+    if (v && v.videoWidth && v.videoHeight) {
+      setVideoAspect(v.videoWidth / v.videoHeight);
+    }
+    onLoadedMetadata();
+  };
+
+  // ── Subtitle sizing — clamp between 13 px and 36 px, ~5.5% of box height ──
+  const subtitleFontSize = boxHeight > 0
+    ? Math.max(13, Math.min(36, boxHeight * 0.055))
+    : 18;
+
+  // ── Karaoke / sentence fallback logic ─────────────────────────────────────
   const useKaraoke = transcript.length > 0;
   const { lineWords, activeId } = useKaraoke
     ? getKaraokeState(transcript, currentTime)
     : { lineWords: [], activeId: null };
-
-  // Sentence-level fallback
   const activeSubtitle = !useKaraoke
     ? subtitles.find((s) => currentTime >= s.startSec && currentTime < s.endSec)
     : null;
-
-  // Key the AnimatePresence on the line's first word id so the transition
-  // fires when the line changes, not on every individual word highlight.
   const karaokeLineKey = lineWords[0]?.id ?? "empty";
 
   return (
     <div className="flex flex-col flex-1 min-h-0 p-3 gap-3">
 
-      {/* ── Video container ── */}
-      <div
-        className="relative flex-1 min-h-0 rounded-2xl overflow-hidden bg-black"
-        style={{ border: "1px solid rgba(255,255,255,0.08)" }}
-      >
-        {videoUrl ? (
-          <>
-            {/* Video element with jump-cut transform */}
-            <motion.video
-              ref={videoRef as React.RefObject<HTMLVideoElement>}
-              src={videoUrl}
-              className="w-full h-full object-contain"
-              onLoadedMetadata={onLoadedMetadata}
-              onTimeUpdate={onTimeUpdate}
-              onPlay={() => {}}
-              onPause={() => {}}
-              onEnded={onEnded}
-              animate={videoControls}
-            />
+      {/* ── Outer: fills available space, centres the video box ─────────────── */}
+      <div className="relative flex-1 min-h-0 flex items-center justify-center">
 
-            {/* ── Karaoke / subtitle overlay ── */}
-            <AnimatePresence>
-              {audioUnlocked && useKaraoke && lineWords.length > 0 && (
-                <motion.div
-                  key={karaokeLineKey}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 4 }}
-                  transition={{ duration: 0.12 }}
-                  className="absolute bottom-10 inset-x-0 flex justify-center px-4 pointer-events-none"
-                >
-                  {/*
-                    dir="rtl" + flex row → first array item appears on the RIGHT.
-                    Words are in chronological order, so word[0] (spoken first)
-                    sits at the right — correct Hebrew reading direction.
-                  */}
-                  <div dir="rtl" className="flex items-baseline justify-center gap-2 flex-wrap">
-                    {lineWords.map((word) => (
-                      <motion.span
-                        key={word.id}
-                        className="subtitle-overlay"
-                        animate={{
-                          color: word.id === activeId ? "#ffe234" : "rgba(255,255,255,0.92)",
-                        }}
-                        transition={{ duration: 0.08 }}
-                      >
-                        {word.text}
-                      </motion.span>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
+        {/* ── Video box: constrained to natural aspect ratio ─────────────────── */}
+        <div
+          ref={videoBoxRef}
+          className="relative rounded-2xl overflow-hidden bg-black w-full h-full"
+          style={{
+            // Use natural aspect ratio once known; default 16/9 for the placeholder
+            aspectRatio: videoAspect ? String(videoAspect) : "16 / 9",
+            // Constrain within the flex parent — never overflow either axis
+            maxWidth: "100%",
+            maxHeight: "100%",
+            // Override w-full / h-full so the aspect-ratio rule wins
+            width: videoAspect ? "auto" : "100%",
+            height: videoAspect ? "auto" : "100%",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+        >
+          {videoUrl ? (
+            <>
+              {/* Video — fills the box exactly; no letter/pillar boxing needed */}
+              <motion.video
+                ref={videoRef as React.RefObject<HTMLVideoElement>}
+                src={videoUrl}
+                className="w-full h-full object-contain"
+                onLoadedMetadata={handleLoadedMetadata}
+                onTimeUpdate={onTimeUpdate}
+                onPlay={() => {}}
+                onPause={() => {}}
+                onEnded={onEnded}
+                animate={videoControls}
+              />
 
-              {/* Sentence-level fallback (when no transcript yet) */}
-              {audioUnlocked && !useKaraoke && activeSubtitle && (
-                <motion.div
-                  key={activeSubtitle.id}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 4 }}
-                  transition={{ duration: 0.1 }}
-                  className="absolute bottom-10 inset-x-0 flex justify-center px-6 pointer-events-none"
-                >
-                  <span className="subtitle-overlay" dir="rtl">
-                    {activeSubtitle.text}
-                  </span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* White flash on jump cut */}
-            <AnimatePresence>
-              {jumpFlash && (
-                <motion.div
-                  initial={{ opacity: 0.28 }}
-                  animate={{ opacity: 0 }}
-                  transition={{ duration: 0.38 }}
-                  className="absolute inset-0 bg-white pointer-events-none"
-                />
-              )}
-            </AnimatePresence>
-
-            {/* Audio unlock overlay (shown before first interaction) */}
-            {!audioUnlocked && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="absolute inset-0 flex flex-col items-center justify-center z-20"
-                style={{ background: "rgba(8,11,20,0.78)", backdropFilter: "blur(6px)" }}
-              >
-                <motion.button
-                  onClick={onUnlock}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.93 }}
-                  className="flex flex-col items-center gap-4"
-                >
-                  {/* Pulsing play button */}
-                  <div className="relative">
-                    {[0, 1].map((i) => (
-                      <motion.div
-                        key={i}
-                        className="absolute inset-0 rounded-full"
-                        style={{ border: "2px solid rgba(59,130,246,0.45)" }}
-                        animate={{ scale: [1, 1.75], opacity: [0.7, 0] }}
-                        transition={{ duration: 1.6, repeat: Infinity, delay: i * 0.6 }}
-                      />
-                    ))}
+              {/* ── Subtitle / karaoke overlay ──────────────────────────────── */}
+              <AnimatePresence>
+                {audioUnlocked && useKaraoke && lineWords.length > 0 && (
+                  <motion.div
+                    key={karaokeLineKey}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute pointer-events-none flex justify-center"
+                    style={{
+                      // Lower third with 10 % safe zone on all sides
+                      bottom: "10%",
+                      left:   "10%",
+                      right:  "10%",
+                    }}
+                  >
                     <div
-                      className="relative w-20 h-20 rounded-full flex items-center justify-center"
-                      style={{
-                        background: "linear-gradient(135deg,#3b82f6,#8b5cf6)",
-                        boxShadow: "0 0 50px rgba(59,130,246,0.5),0 0 90px rgba(139,92,246,0.3)",
-                      }}
+                      dir="rtl"
+                      className="flex items-baseline justify-center gap-[0.35em] flex-wrap"
+                      style={{ fontSize: subtitleFontSize }}
                     >
-                      <Play size={34} className="text-white ml-1.5" />
+                      {lineWords.map((word) => (
+                        <motion.span
+                          key={word.id}
+                          className="subtitle-overlay"
+                          style={{ fontSize: "inherit" }}
+                          animate={{
+                            color: word.id === activeId
+                              ? "#ffe234"
+                              : "rgba(255,255,255,0.92)",
+                          }}
+                          transition={{ duration: 0.08 }}
+                        >
+                          {word.text}
+                        </motion.span>
+                      ))}
                     </div>
-                  </div>
+                  </motion.div>
+                )}
 
-                  <div className="text-center">
-                    <p className="text-white font-bold text-xl leading-snug">
-                      לחץ להפעלה עם שמע
-                    </p>
-                    <p className="text-white/45 text-sm mt-1 flex items-center gap-1.5 justify-center">
-                      <Headphones size={13} />
-                      שמע מקורי + מוזיקת רקע
-                    </p>
+                {/* Sentence-level fallback */}
+                {audioUnlocked && !useKaraoke && activeSubtitle && (
+                  <motion.div
+                    key={activeSubtitle.id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 4 }}
+                    transition={{ duration: 0.1 }}
+                    className="absolute pointer-events-none flex justify-center"
+                    style={{ bottom: "10%", left: "10%", right: "10%" }}
+                  >
+                    <span
+                      className="subtitle-overlay"
+                      dir="rtl"
+                      style={{ fontSize: subtitleFontSize }}
+                    >
+                      {activeSubtitle.text}
+                    </span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Jump-cut white flash */}
+              <AnimatePresence>
+                {jumpFlash && (
+                  <motion.div
+                    initial={{ opacity: 0.28 }}
+                    animate={{ opacity: 0 }}
+                    transition={{ duration: 0.38 }}
+                    className="absolute inset-0 bg-white pointer-events-none"
+                  />
+                )}
+              </AnimatePresence>
+
+              {/* Audio unlock overlay */}
+              {!audioUnlocked && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="absolute inset-0 flex flex-col items-center justify-center z-20"
+                  style={{ background: "rgba(8,11,20,0.78)", backdropFilter: "blur(6px)" }}
+                >
+                  <motion.button
+                    onClick={onUnlock}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.93 }}
+                    className="flex flex-col items-center gap-4"
+                  >
+                    <div className="relative">
+                      {[0, 1].map((i) => (
+                        <motion.div
+                          key={i}
+                          className="absolute inset-0 rounded-full"
+                          style={{ border: "2px solid rgba(59,130,246,0.45)" }}
+                          animate={{ scale: [1, 1.75], opacity: [0.7, 0] }}
+                          transition={{ duration: 1.6, repeat: Infinity, delay: i * 0.6 }}
+                        />
+                      ))}
+                      <div
+                        className="relative w-20 h-20 rounded-full flex items-center justify-center"
+                        style={{
+                          background: "linear-gradient(135deg,#3b82f6,#8b5cf6)",
+                          boxShadow: "0 0 50px rgba(59,130,246,0.5),0 0 90px rgba(139,92,246,0.3)",
+                        }}
+                      >
+                        <Play size={34} className="text-white ml-1.5" />
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-white font-bold text-xl leading-snug">
+                        לחץ להפעלה עם שמע
+                      </p>
+                      <p className="text-white/45 text-sm mt-1 flex items-center gap-1.5 justify-center">
+                        <Headphones size={13} />
+                        שמע מקורי + מוזיקת רקע
+                      </p>
+                    </div>
+                  </motion.button>
+                </motion.div>
+              )}
+
+              {/* Play/pause tap target (after unlock) */}
+              {audioUnlocked && (
+                <motion.button
+                  onClick={onTogglePlay}
+                  className="absolute inset-0 flex items-center justify-center"
+                  animate={{ opacity: isPlaying ? 0 : 1 }}
+                  whileHover={{ opacity: 1 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <div
+                    className="w-14 h-14 rounded-full flex items-center justify-center"
+                    style={{
+                      background: "rgba(0,0,0,0.55)",
+                      backdropFilter: "blur(8px)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    }}
+                  >
+                    <Play size={22} className="text-white ml-1" />
                   </div>
                 </motion.button>
-              </motion.div>
-            )}
-
-            {/* Play/pause click-through (after unlock) */}
-            {audioUnlocked && (
-              <motion.button
-                onClick={onTogglePlay}
-                className="absolute inset-0 flex items-center justify-center"
-                animate={{ opacity: isPlaying ? 0 : 1 }}
-                whileHover={{ opacity: 1 }}
-                transition={{ duration: 0.2 }}
+              )}
+            </>
+          ) : (
+            /* No file yet */
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+              <div
+                className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                style={{ background: "rgba(255,255,255,0.04)" }}
               >
-                <div
-                  className="w-14 h-14 rounded-full flex items-center justify-center"
-                  style={{
-                    background: "rgba(0,0,0,0.55)",
-                    backdropFilter: "blur(8px)",
-                    border: "1px solid rgba(255,255,255,0.2)",
-                  }}
-                >
-                  <Play size={22} className="text-white ml-1" />
-                </div>
-              </motion.button>
-            )}
-          </>
-        ) : (
-          /* No file yet */
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center"
-              style={{ background: "rgba(255,255,255,0.04)" }}
-            >
-              <Play size={24} className="text-white/20 ml-0.5" />
+                <Play size={24} className="text-white/20 ml-0.5" />
+              </div>
+              <p className="text-white/25 text-sm">לא הועלה וידאו</p>
             </div>
-            <p className="text-white/25 text-sm">לא הועלה וידאו</p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* ── Audio visualizer bar ── */}
+      {/* ── Audio visualizer bar ─────────────────────────────────────────────── */}
       <div
         className="flex items-end gap-0.5 h-10 px-3 rounded-xl shrink-0"
         style={{
@@ -267,7 +313,6 @@ export default function VideoPreview({
           border: "1px solid rgba(255,255,255,0.07)",
         }}
       >
-        {/* Label */}
         <div className="flex items-center gap-1.5 shrink-0 pr-2 pb-0.5">
           <Zap
             size={11}
@@ -277,8 +322,6 @@ export default function VideoPreview({
             {audioUnlocked && isPlaying ? "LIVE" : "IDLE"}
           </span>
         </div>
-
-        {/* Bars */}
         {visData.map((h, i) => (
           <div
             key={i}
@@ -292,14 +335,12 @@ export default function VideoPreview({
             }}
           />
         ))}
-
-        {/* Volume indicators */}
         <div className="flex items-center gap-1 shrink-0 pl-2 pb-0.5">
           <Volume2 size={11} className="text-white/20" />
         </div>
       </div>
 
-      {/* ── Scrubber ── */}
+      {/* ── Scrubber ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 px-1 shrink-0">
         <button
           onClick={onTogglePlay}
@@ -307,11 +348,9 @@ export default function VideoPreview({
         >
           {isPlaying ? <Pause size={18} /> : <Play size={18} />}
         </button>
-
         <span className="text-white/30 text-xs font-mono w-10 shrink-0">
           {fmt(currentTime)}
         </span>
-
         <input
           type="range"
           min={0}
@@ -326,7 +365,6 @@ export default function VideoPreview({
               rgba(255,255,255,0.1) ${progress}%)`,
           }}
         />
-
         <span className="text-white/30 text-xs font-mono w-10 shrink-0 text-left">
           {fmt(duration)}
         </span>
