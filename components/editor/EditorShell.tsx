@@ -5,7 +5,7 @@ import { useAnimation } from "framer-motion";
 import {
   ChevronRight, Scissors, Zap, Download,
 } from "lucide-react";
-import { useEditor, generateClips, generateSubtitles, generateAutoJumpCuts, MUSIC_TRACKS } from "@/context/EditorContext";
+import { useEditor, generateClips, generateAutoJumpCuts, MUSIC_TRACKS } from "@/context/EditorContext";
 import VideoPreview from "./VideoPreview";
 import Timeline from "./Timeline";
 import SidebarPanel from "./SidebarPanel";
@@ -134,7 +134,6 @@ export default function EditorShell({ onBack, onNext }: Props) {
     const d = video.duration;
     dispatch({ type: "SET_DURATION", duration: d });
     dispatch({ type: "INIT_CLIPS",     clips: generateClips(d) });
-    dispatch({ type: "INIT_SUBTITLES", subtitles: generateSubtitles(d) });
   }, [dispatch]);
 
   const handleTimeUpdate = useCallback(() => {

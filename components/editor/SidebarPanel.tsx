@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlignRight, Music, Sparkles,
-  Volume2, VolumeX, Check, Zap,
+  Volume2, VolumeX, Check, Zap, KeyRound,
 } from "lucide-react";
 import { useEditor, MUSIC_TRACKS } from "@/context/EditorContext";
 
@@ -25,7 +25,7 @@ const EFFECTS = [
 
 export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) {
   const { state, dispatch } = useEditor();
-  const { subtitles, selectedTrack, videoVolume, musicVolume } = state;
+  const { subtitles, selectedTrack, videoVolume, musicVolume, transcriptionError } = state;
 
   const [activeTab,    setActiveTab]    = useState<Tab>("subtitles");
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
@@ -84,9 +84,39 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
               exit={{ opacity: 0, y: -6 }}
               className="flex flex-col gap-2"
             >
-              <p className="text-white/25 text-[11px] mb-1">
-                לחץ על שורה לעריכה · לחץ על זמן לקפיצה
-              </p>
+              {transcriptionError?.includes("NOT_CONFIGURED") && (
+                <div
+                  className="flex items-start gap-2.5 p-3 rounded-xl mb-2"
+                  style={{
+                    background: "rgba(239,68,68,0.08)",
+                    border: "1px solid rgba(239,68,68,0.3)",
+                  }}
+                >
+                  <KeyRound size={14} className="text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-red-400 text-xs font-semibold">API Key Missing</p>
+                    <p className="text-red-300/70 text-[11px] leading-relaxed mt-0.5">
+                      Please configure Deepgram to see real transcription.
+                      Set <span className="font-mono">DEEPGRAM_API_KEY</span> in your environment.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {!transcriptionError && subtitles.length === 0 && (
+                <div className="flex flex-col items-center gap-2 py-6 text-center">
+                  <AlignRight size={22} className="text-white/15" />
+                  <p className="text-white/25 text-xs">
+                    כתוביות יופיעו לאחר התמלול
+                  </p>
+                </div>
+              )}
+
+              {subtitles.length > 0 && (
+                <p className="text-white/25 text-[11px] mb-1">
+                  לחץ על שורה לעריכה · לחץ על זמן לקפיצה
+                </p>
+              )}
 
               {subtitles.map((sub) => {
                 const isActive =

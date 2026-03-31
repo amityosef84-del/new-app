@@ -37,6 +37,7 @@ export interface EditorState {
   clips: Clip[];
   subtitles: Subtitle[];
   transcript: Word[];
+  transcriptionError: string | null;
   selectedTrack: string;
   videoVolume: number;
   musicVolume: number;
@@ -50,6 +51,7 @@ export type EditorAction =
   | { type: "INIT_CLIPS"; clips: Clip[] }
   | { type: "INIT_SUBTITLES"; subtitles: Subtitle[] }
   | { type: "SET_TRANSCRIPT"; words: Word[] }
+  | { type: "SET_TRANSCRIPTION_ERROR"; error: string }
   | { type: "SPLIT_CLIP"; atTime: number }
   | { type: "REMOVE_CLIP"; id: string }
   | { type: "UPDATE_SUBTITLE"; id: string; text: string }
@@ -73,21 +75,6 @@ export const CLIP_COLORS = [
 
 const CLIP_LABELS = ["פתיחה", "תוכן ראשי", "חלק שני", "שיא", "סיכום", "סיום"];
 
-// ─── Word transcript generator ───────────────────────────────────────────────
-
-
-const SUBTITLE_PHRASES = [
-  "שלום!",
-  "ברוכים הבאים לערוץ שלי",
-  "היום נדבר על",
-  "הנושא הכי חם של השנה",
-  "זה חשוב מאוד",
-  "כי זה ישנה את החיים שלכם",
-  "בואו נצלול לתוך הפרטים",
-  "לא תאמינו כמה זה מדהים",
-  "אל תפספסו את זה",
-  "תעשו לייק ותעקבו לתוכן נוסף!",
-];
 
 // ─── Generator helpers ───────────────────────────────────────────────────────────
 
@@ -126,17 +113,6 @@ export function generateAutoJumpCuts(d: number): Clip[] {
   return clips;
 }
 
-export function generateSubtitles(d: number): Subtitle[] {
-  const dur = d > 0 ? d : 60;
-  const seg = dur / SUBTITLE_PHRASES.length;
-  return SUBTITLE_PHRASES.map((text, i) => ({
-    id: `s${i}`,
-    startSec: i * seg + 0.05,
-    endSec: (i + 1) * seg - 0.1,
-    text,
-  }));
-}
-
 // ─── Reducer ─────────────────────────────────────────────────────────────────────
 
 const INITIAL: EditorState = {
@@ -145,6 +121,7 @@ const INITIAL: EditorState = {
   clips: [],
   subtitles: [],
   transcript: [],
+  transcriptionError: null,
   selectedTrack: "t1",
   videoVolume: 80,
   musicVolume: 40,
@@ -162,6 +139,8 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       return state.subtitles.length > 0 ? state : { ...state, subtitles: action.subtitles };
     case "SET_TRANSCRIPT":
       return { ...state, transcript: action.words };
+    case "SET_TRANSCRIPTION_ERROR":
+      return { ...state, transcriptionError: action.error };
     case "SPLIT_CLIP": {
       const t = action.atTime;
       const idx = state.clips.findIndex(c => t > c.startSec + 0.15 && t < c.endSec - 0.15);

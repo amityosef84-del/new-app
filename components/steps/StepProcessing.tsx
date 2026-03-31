@@ -56,32 +56,6 @@ const PHASE_RATES: Record<1 | 2 | 3, number> = {
   3: (25 / 3000) * TICK_MS,  // 0.417 %/tick
 };
 
-// ─── Fallback word stream (shown while real analysis is still in progress) ────
-// Typed as Word[] so it's a drop-in for analysisResult when not yet available.
-
-const WORD_STREAM: Word[] = [
-  { id: "d0",  text: "שלום",    start: 0.12, end: 0.44, confidence: 0.99 },
-  { id: "d1",  text: "ברוכים",  start: 0.52, end: 0.91, confidence: 0.97 },
-  { id: "d2",  text: "הבאים",   start: 0.95, end: 1.28, confidence: 0.98 },
-  { id: "d3",  text: "לסרטון",  start: 1.35, end: 1.74, confidence: 0.96 },
-  { id: "d4",  text: "שלי",     start: 1.80, end: 2.05, confidence: 0.99 },
-  { id: "d5",  text: "היום",    start: 2.40, end: 2.68, confidence: 0.98 },
-  { id: "d6",  text: "אנחנו",   start: 2.75, end: 3.14, confidence: 0.95 },
-  { id: "d7",  text: "הולכים",  start: 3.20, end: 3.60, confidence: 0.97 },
-  { id: "d8",  text: "לדבר",    start: 3.65, end: 3.92, confidence: 0.99 },
-  { id: "d9",  text: "על",      start: 3.98, end: 4.11, confidence: 0.99 },
-  { id: "d10", text: "הנושא",   start: 4.20, end: 4.56, confidence: 0.96 },
-  { id: "d11", text: "הכי",     start: 4.62, end: 4.81, confidence: 0.98 },
-  { id: "d12", text: "חם",      start: 4.87, end: 5.05, confidence: 0.97 },
-  { id: "d13", text: "של",      start: 5.10, end: 5.22, confidence: 0.99 },
-  { id: "d14", text: "השנה",    start: 5.28, end: 5.68, confidence: 0.98 },
-  { id: "d15", text: "זה",      start: 6.10, end: 6.28, confidence: 0.99 },
-  { id: "d16", text: "חשוב",    start: 6.35, end: 6.72, confidence: 0.97 },
-  { id: "d17", text: "מאוד",    start: 6.78, end: 7.12, confidence: 0.96 },
-  { id: "d18", text: "כי",      start: 7.20, end: 7.32, confidence: 0.99 },
-  { id: "d19", text: "ישנה",    start: 7.38, end: 7.68, confidence: 0.95 },
-];
-
 // ─── Viral tips carousel ───────────────────────────────────────────────────────
 
 const TIPS = [
@@ -161,11 +135,11 @@ export default function StepProcessing({ fileName, onComplete, onBack }: Props) 
   // ── Phase-2 word stream reveal (driven by progress) ───────────────────────
   useEffect(() => {
     if (currentPhase === 2) {
-      const frac    = (progress - 30) / 45;
-      const stream  = analysisResult ?? WORD_STREAM;
+      const frac   = (progress - 30) / 45;
+      const stream = analysisResult ?? [];
       setRevealedWords(Math.min(Math.floor(frac * stream.length), stream.length));
     } else if (currentPhase >= 3) {
-      const stream = analysisResult ?? WORD_STREAM;
+      const stream = analysisResult ?? [];
       setRevealedWords(stream.length);
     }
   }, [progress, currentPhase, analysisResult]);
@@ -179,8 +153,11 @@ export default function StepProcessing({ fileName, onComplete, onBack }: Props) 
 
       const words = analysisResult ?? [];
       // Dispatch word-level transcript + derived subtitle lines
-      dispatch({ type: "SET_TRANSCRIPT",  words });
-      dispatch({ type: "INIT_SUBTITLES",  subtitles: wordsToSubtitles(words) });
+      dispatch({ type: "SET_TRANSCRIPT", words });
+      dispatch({ type: "INIT_SUBTITLES", subtitles: wordsToSubtitles(words) });
+      if (analysisError) {
+        dispatch({ type: "SET_TRANSCRIPTION_ERROR", error: analysisError });
+      }
 
       setDone(true);
       const t = setTimeout(onComplete, 1500);
@@ -189,10 +166,10 @@ export default function StepProcessing({ fileName, onComplete, onBack }: Props) 
   }, [progress, analysisResult, analysisError, dispatch, onComplete]); // no `done` dep — prevents cleanup race
 
   // ── Derived display values ────────────────────────────────────────────────
-  const stream       = analysisResult ?? WORD_STREAM;
+  const stream       = analysisResult ?? [];
   const frac2        = currentPhase === 2 ? (progress - 30) / 45 : currentPhase >= 3 ? 1 : 0;
   const wordCount    = Math.round(frac2 * stream.length);
-  const confidence   = parseFloat((frac2 * (analysisResult ? 97.4 : 97.4)).toFixed(1));
+  const confidence   = wordCount > 0 ? parseFloat((frac2 * 97.4).toFixed(1)) : 0;
 
   return (
     <motion.div
@@ -593,9 +570,9 @@ function Phase2WordStream({ words, revealed }: { words: Word[]; revealed: number
 // ─── Phase 3: Caption style render preview ────────────────────────────────────
 
 const CAPTION_LINES = [
-  ["שלום", "ברוכים", "הבאים"],
-  ["היום", "אנחנו", "מדברים"],
-  ["על", "הנושא", "החם"],
+  ["Caption", "Style", "Demo"],
+  ["TikTok", "Bold", "Look"],
+  ["Auto", "Sync", "Ready"],
 ];
 
 function Phase3RenderViz() {
@@ -664,18 +641,19 @@ function Phase3RenderViz() {
 
 // ─── Caption preview line (video placeholder overlay, phase 3) ────────────────
 
+const PREVIEW_WORDS = ["Auto", "Caption", "Sync"];
+
 function CaptionPreviewLine() {
-  const words = WORD_STREAM.slice(0, 3);
   const [active, setActive] = useState(0);
 
   useEffect(() => {
-    const iv = setInterval(() => setActive(a => (a + 1) % words.length), 350);
+    const iv = setInterval(() => setActive(a => (a + 1) % PREVIEW_WORDS.length), 350);
     return () => clearInterval(iv);
-  }, [words.length]);
+  }, []);
 
   return (
-    <div className="flex items-center justify-center gap-1" dir="rtl">
-      {words.map((w, i) => (
+    <div className="flex items-center justify-center gap-1">
+      {PREVIEW_WORDS.map((word, i) => (
         <span
           key={i}
           className="font-black text-xs"
@@ -686,7 +664,7 @@ function CaptionPreviewLine() {
             transition: "color 0.12s",
           }}
         >
-          {w.text}
+          {word}
         </span>
       ))}
     </div>
