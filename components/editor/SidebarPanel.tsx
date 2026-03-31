@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  AlignRight, Music, Sparkles,
+  AlignRight, Music, Sparkles, Palette,
   Volume2, VolumeX, Check, Zap, KeyRound,
 } from "lucide-react";
 import { useEditor, MUSIC_TRACKS } from "@/context/EditorContext";
@@ -14,7 +14,13 @@ interface Props {
   onSeek: (t: number) => void;
 }
 
-type Tab = "subtitles" | "audio" | "effects";
+type Tab = "subtitles" | "style" | "audio" | "effects";
+
+const FONTS = [
+  { id: "Heebo",     label: "Heebo"     },
+  { id: "Assistant", label: "Assistant" },
+  { id: "Rubik",     label: "Rubik"     },
+];
 
 const EFFECTS = [
   { id: "zoom",  label: "Zoom Punch",  icon: "🔍", desc: "הגדלה פתאומית" },
@@ -25,7 +31,7 @@ const EFFECTS = [
 
 export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) {
   const { state, dispatch } = useEditor();
-  const { subtitles, selectedTrack, videoVolume, musicVolume, transcriptionError } = state;
+  const { subtitles, selectedTrack, videoVolume, musicVolume, transcriptionError, subtitleStyle } = state;
 
   const [activeTab,    setActiveTab]    = useState<Tab>("subtitles");
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
@@ -33,6 +39,7 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
 
   const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: "subtitles", label: "כתוביות", icon: AlignRight },
+    { id: "style",     label: "סגנון",   icon: Palette    },
     { id: "audio",     label: "אודיו",   icon: Music      },
     { id: "effects",   label: "אפקטים",  icon: Sparkles   },
   ];
@@ -388,6 +395,103 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
                     </button>
                   );
                 })}
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── Style ── */}
+          {activeTab === "style" && (
+            <motion.div
+              key="style"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="flex flex-col gap-4"
+            >
+              {/* Font family */}
+              <div>
+                <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider mb-2">גופן</p>
+                <div className="flex flex-col gap-1.5">
+                  {FONTS.map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => dispatch({ type: "SET_SUBTITLE_STYLE", style: { fontFamily: f.id } })}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all"
+                      style={{
+                        fontFamily: f.id + ", sans-serif",
+                        fontWeight: 700,
+                        background: subtitleStyle.fontFamily === f.id ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.03)",
+                        border: subtitleStyle.fontFamily === f.id ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.07)",
+                        color: subtitleStyle.fontFamily === f.id ? "#fff" : "rgba(255,255,255,0.45)",
+                      }}
+                    >
+                      <span>{f.label}</span>
+                      <span className="text-[10px] opacity-60" style={{ fontFamily: f.id + ", sans-serif" }}>אבגד</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Font size scale */}
+              <div>
+                <div className="flex justify-between mb-2">
+                  <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider">גודל גופן</p>
+                  <span className="text-white/30 text-[10px] font-mono">{Math.round(subtitleStyle.scale * 100)}%</span>
+                </div>
+                <input
+                  type="range" min={0.5} max={1.8} step={0.05}
+                  value={subtitleStyle.scale}
+                  onChange={(e) => dispatch({ type: "SET_SUBTITLE_STYLE", style: { scale: Number(e.target.value) } })}
+                  className="w-full"
+                  style={{ background: `linear-gradient(to right, rgba(139,92,246,0.7) ${((subtitleStyle.scale - 0.5) / 1.3) * 100}%, rgba(255,255,255,0.1) ${((subtitleStyle.scale - 0.5) / 1.3) * 100}%)` }}
+                />
+              </div>
+
+              {/* Vertical position */}
+              <div>
+                <div className="flex justify-between mb-2">
+                  <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider">מיקום אנכי</p>
+                  <span className="text-white/30 text-[10px] font-mono">{Math.round(subtitleStyle.verticalPos)}%</span>
+                </div>
+                <input
+                  type="range" min={5} max={88} step={1}
+                  value={subtitleStyle.verticalPos}
+                  onChange={(e) => dispatch({ type: "SET_SUBTITLE_STYLE", style: { verticalPos: Number(e.target.value) } })}
+                  className="w-full"
+                  style={{ background: `linear-gradient(to right, rgba(59,130,246,0.7) ${((subtitleStyle.verticalPos - 5) / 83) * 100}%, rgba(255,255,255,0.1) ${((subtitleStyle.verticalPos - 5) / 83) * 100}%)` }}
+                />
+                <div className="flex justify-between mt-1 text-[9px] text-white/20">
+                  <span>עליון</span><span>תחתון</span>
+                </div>
+              </div>
+
+              {/* Colors */}
+              <div>
+                <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider mb-2">צבעים</p>
+                <div className="flex flex-col gap-2">
+                  {[
+                    { label: "צבע טקסט",        key: "textColor"   as const, value: subtitleStyle.textColor   },
+                    { label: "צבע מילה פעילה",   key: "activeColor" as const, value: subtitleStyle.activeColor },
+                    { label: "צבע צל / מתאר",    key: "shadowColor" as const, value: subtitleStyle.shadowColor },
+                  ].map(({ label, key, value }) => (
+                    <label key={key} className="flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer"
+                      style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                      <span className="text-white/55 text-xs">{label}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-white/25 text-[10px] font-mono">{value}</span>
+                        <div className="relative w-7 h-7 rounded-lg overflow-hidden border border-white/15"
+                          style={{ background: value }}>
+                          <input
+                            type="color"
+                            value={value}
+                            onChange={(e) => dispatch({ type: "SET_SUBTITLE_STYLE", style: { [key]: e.target.value } })}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </div>
             </motion.div>
           )}

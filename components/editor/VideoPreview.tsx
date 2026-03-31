@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAnimation } from "framer-motion";
 type AnimationControls = ReturnType<typeof useAnimation>;
-import { Play, Pause, Headphones, Volume2, Zap } from "lucide-react";
+import { Play, Pause, Headphones, Volume2, Zap, GripVertical } from "lucide-react";
 import type { Subtitle, Word } from "@/context/EditorContext";
+import { useEditor } from "@/context/EditorContext";
 
 // ─── Karaoke helper ──────────────────────────────────────────────────────────
 
@@ -16,22 +17,14 @@ function getKaraokeState(
   currentTime: number,
 ): { lineWords: Word[]; activeId: string | null } {
   if (transcript.length === 0) return { lineWords: [], activeId: null };
-
   const activeIdx = transcript.findIndex(
     (w) => currentTime >= w.start && currentTime < w.end,
   );
   const anchorIdx =
     activeIdx >= 0
       ? activeIdx
-      : Math.max(
-          0,
-          transcript.reduce(
-            (best, w, i) => (w.end <= currentTime ? i : best),
-            0,
-          ),
-        );
-  const lineStart =
-    Math.floor(anchorIdx / KARAOKE_LINE_SIZE) * KARAOKE_LINE_SIZE;
+      : Math.max(0, transcript.reduce((best, w, i) => (w.end <= currentTime ? i : best), 0));
+  const lineStart = Math.floor(anchorIdx / KARAOKE_LINE_SIZE) * KARAOKE_LINE_SIZE;
   const lineWords = transcript.slice(lineStart, lineStart + KARAOKE_LINE_SIZE);
   const activeId = activeIdx >= 0 ? transcript[activeIdx].id : null;
   return { lineWords, activeId };
@@ -67,39 +60,33 @@ export default function VideoPreview({
   progress, onUnlock, onTogglePlay, onSeek,
   onLoadedMetadata, onTimeUpdate, onEnded, fmt,
 }: Props) {
+  const { state, dispatch } = useEditor();
+  const { subtitleStyle } = state;
 
-  // ── Aspect ratio detected from the video's natural dimensions ──────────────
+  // ── Aspect ratio & box height ───────────────────────────────────────────────
   const [videoAspect, setVideoAspect] = useState<number | null>(null);
-
-  // ── Track the rendered height of the video box to scale subtitles ──────────
   const videoBoxRef = useRef<HTMLDivElement>(null);
   const [boxHeight, setBoxHeight] = useState(0);
 
   useEffect(() => {
     const el = videoBoxRef.current;
     if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      setBoxHeight(entries[0].contentRect.height);
-    });
+    const ro = new ResizeObserver((entries) => setBoxHeight(entries[0].contentRect.height));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  // Wrap the parent's onLoadedMetadata so we can read natural dimensions here
   const handleLoadedMetadata = () => {
     const v = videoRef.current;
-    if (v && v.videoWidth && v.videoHeight) {
-      setVideoAspect(v.videoWidth / v.videoHeight);
-    }
+    if (v && v.videoWidth && v.videoHeight) setVideoAspect(v.videoWidth / v.videoHeight);
     onLoadedMetadata();
   };
 
-  // ── Subtitle sizing — clamp between 13 px and 36 px, ~5.5% of box height ──
-  const subtitleFontSize = boxHeight > 0
-    ? Math.max(13, Math.min(36, boxHeight * 0.055))
-    : 18;
+  // ── Font size = boxHeight × scale × 5.5 %, clamped 13–40 px ───────────────
+  const baseFontSize = boxHeight > 0 ? Math.max(13, Math.min(40, boxHeight * 0.055)) : 18;
+  const fontSize = baseFontSize * subtitleStyle.scale;
 
-  // ── Karaoke / sentence fallback logic ─────────────────────────────────────
+  // ── Karaoke / sentence state ────────────────────────────────────────────────
   const useKaraoke = transcript.length > 0;
   const { lineWords, activeId } = useKaraoke
     ? getKaraokeState(transcript, currentTime)
@@ -109,23 +96,76 @@ export default function VideoPreview({
     : null;
   const karaokeLineKey = lineWords[0]?.id ?? "empty";
 
+  // ── Editable word ───────────────────────────────────────────────────────────
+  const [editingWordId, setEditingWordId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+
+  const startEdit = (word: Word) => {
+    setEditingWordId(word.id);
+    setEditValue(word.text);
+  };
+  const commitEdit = () => {
+    if (editingWordId && editValue.trim()) {
+      dispatch({ type: "UPDATE_WORD", id: editingWordId, text: editValue.trim() });
+    }
+    setEditingWordId(null);
+  };
+
+  // ── Draggable vertical position ─────────────────────────────────────────────
+  // Live drag position stored in a ref to avoid re-renders on every pixel move.
+  // React state is only updated on pointerUp to sync to context.
+  const dragPosRef    = useRef(subtitleStyle.verticalPos);
+  const dragStartRef  = useRef<{ y: number; pos: number } | null>(null);
+  const dragHandleRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Keep ref in sync when style changes externally (e.g. sidebar slider)
+  useEffect(() => { dragPosRef.current = subtitleStyle.verticalPos; }, [subtitleStyle.verticalPos]);
+
+  const onDragPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragStartRef.current = { y: e.clientY, pos: dragPosRef.current };
+    setIsDragging(true);
+  }, []);
+
+  const onDragPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragStartRef.current || !videoBoxRef.current) return;
+    const boxH = videoBoxRef.current.getBoundingClientRect().height;
+    if (boxH === 0) return;
+    const deltaPercent = ((e.clientY - dragStartRef.current.y) / boxH) * 100;
+    const newPos = Math.max(5, Math.min(88, dragStartRef.current.pos + deltaPercent));
+    dragPosRef.current = newPos;
+    // Move the DOM element directly for 60 fps — no React re-render
+    if (dragHandleRef.current) {
+      dragHandleRef.current.style.top = `${newPos}%`;
+    }
+  }, []);
+
+  const onDragPointerUp = useCallback(() => {
+    if (!dragStartRef.current) return;
+    dragStartRef.current = null;
+    setIsDragging(false);
+    dispatch({ type: "SET_SUBTITLE_STYLE", style: { verticalPos: dragPosRef.current } });
+  }, [dispatch]);
+
+  const subtitleTopStyle = `${subtitleStyle.verticalPos}%`;
+
   return (
     <div className="flex flex-col flex-1 min-h-0 p-3 gap-3">
 
-      {/* ── Outer: fills available space, centres the video box ─────────────── */}
+      {/* ── Outer centering wrapper ─────────────────────────────────────────── */}
       <div className="relative flex-1 min-h-0 flex items-center justify-center">
 
-        {/* ── Video box: constrained to natural aspect ratio ─────────────────── */}
+        {/* ── Video box ──────────────────────────────────────────────────────── */}
         <div
           ref={videoBoxRef}
-          className="relative rounded-2xl overflow-hidden bg-black w-full h-full"
+          className="relative rounded-2xl overflow-hidden bg-black"
           style={{
-            // Use natural aspect ratio once known; default 16/9 for the placeholder
             aspectRatio: videoAspect ? String(videoAspect) : "16 / 9",
-            // Constrain within the flex parent — never overflow either axis
             maxWidth: "100%",
             maxHeight: "100%",
-            // Override w-full / h-full so the aspect-ratio rule wins
             width: videoAspect ? "auto" : "100%",
             height: videoAspect ? "auto" : "100%",
             border: "1px solid rgba(255,255,255,0.08)",
@@ -133,7 +173,6 @@ export default function VideoPreview({
         >
           {videoUrl ? (
             <>
-              {/* Video — fills the box exactly; no letter/pillar boxing needed */}
               <motion.video
                 ref={videoRef as React.RefObject<HTMLVideoElement>}
                 src={videoUrl}
@@ -146,70 +185,125 @@ export default function VideoPreview({
                 animate={videoControls}
               />
 
-              {/* ── Subtitle / karaoke overlay ──────────────────────────────── */}
-              <AnimatePresence>
-                {audioUnlocked && useKaraoke && lineWords.length > 0 && (
-                  <motion.div
-                    key={karaokeLineKey}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 4 }}
-                    transition={{ duration: 0.12 }}
-                    className="absolute pointer-events-none flex justify-center"
+              {/* ── Subtitle / karaoke overlay (draggable) ──────────────────── */}
+              {(audioUnlocked || !videoUrl) && (useKaraoke ? lineWords.length > 0 : !!activeSubtitle) && (
+                <div
+                  ref={dragHandleRef}
+                  className="absolute inset-x-0 flex flex-col items-center pointer-events-none"
+                  style={{
+                    top: subtitleTopStyle,
+                    transform: "translateY(-50%)",
+                    paddingLeft:  "10%",
+                    paddingRight: "10%",
+                  }}
+                >
+                  {/* Drag handle — only visible on hover, pointer-events re-enabled */}
+                  <div
+                    className="pointer-events-auto mb-1 flex items-center gap-1 px-2 py-0.5 rounded-full opacity-0 hover:opacity-100 transition-opacity"
                     style={{
-                      // Lower third with 10 % safe zone on all sides
-                      bottom: "10%",
-                      left:   "10%",
-                      right:  "10%",
+                      background: "rgba(0,0,0,0.55)",
+                      cursor: isDragging ? "grabbing" : "grab",
+                      opacity: isDragging ? 1 : undefined,
                     }}
+                    onPointerDown={onDragPointerDown}
+                    onPointerMove={onDragPointerMove}
+                    onPointerUp={onDragPointerUp}
                   >
-                    <div
-                      dir="rtl"
-                      className="flex items-baseline justify-center gap-[0.35em] flex-wrap"
-                      style={{ fontSize: subtitleFontSize }}
-                    >
-                      {lineWords.map((word) => (
-                        <motion.span
-                          key={word.id}
-                          className="subtitle-overlay"
-                          style={{ fontSize: "inherit" }}
-                          animate={{
-                            color: word.id === activeId
-                              ? "#ffe234"
-                              : "rgba(255,255,255,0.92)",
-                          }}
-                          transition={{ duration: 0.08 }}
+                    <GripVertical size={12} className="text-white/60" />
+                    <span className="text-white/40 text-[9px] font-mono select-none">גרור</span>
+                  </div>
+
+                  {/* Words */}
+                  <AnimatePresence mode="wait">
+                    {useKaraoke ? (
+                      <motion.div
+                        key={karaokeLineKey}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 4 }}
+                        transition={{ duration: 0.12 }}
+                        dir="rtl"
+                        className="flex items-baseline justify-center gap-[0.35em] flex-wrap pointer-events-auto"
+                        style={{ fontSize }}
+                      >
+                        {lineWords.map((word) =>
+                          editingWordId === word.id ? (
+                            <input
+                              key={word.id}
+                              autoFocus
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onBlur={commitEdit}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") commitEdit();
+                                if (e.key === "Escape") setEditingWordId(null);
+                              }}
+                              className="outline-none rounded px-1 text-center"
+                              style={{
+                                fontFamily:  subtitleStyle.fontFamily + ", sans-serif",
+                                fontWeight:  900,
+                                fontSize:    "inherit",
+                                color:       subtitleStyle.activeColor,
+                                background:  "rgba(0,0,0,0.7)",
+                                border:      "1px solid rgba(255,226,52,0.6)",
+                                width:       `${Math.max(2, editValue.length + 1)}ch`,
+                                minWidth:    "2ch",
+                              }}
+                            />
+                          ) : (
+                            <motion.span
+                              key={word.id}
+                              className="subtitle-overlay cursor-text select-none"
+                              style={{
+                                fontFamily: subtitleStyle.fontFamily + ", sans-serif",
+                                fontSize:   "inherit",
+                                WebkitTextStroke: `2px ${subtitleStyle.shadowColor}`,
+                                textShadow: `0 2px 10px ${subtitleStyle.shadowColor}cc, 0 0 24px ${subtitleStyle.shadowColor}aa`,
+                              }}
+                              animate={{
+                                color: word.id === activeId
+                                  ? subtitleStyle.activeColor
+                                  : subtitleStyle.textColor,
+                              }}
+                              transition={{ duration: 0.08 }}
+                              onClick={() => startEdit(word)}
+                              title="לחץ לעריכה"
+                            >
+                              {word.text}
+                            </motion.span>
+                          )
+                        )}
+                      </motion.div>
+                    ) : (
+                      activeSubtitle && (
+                        <motion.div
+                          key={activeSubtitle.id}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 4 }}
+                          transition={{ duration: 0.1 }}
+                          className="pointer-events-auto"
                         >
-                          {word.text}
-                        </motion.span>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
+                          <span
+                            className="subtitle-overlay cursor-text"
+                            dir="rtl"
+                            style={{
+                              fontFamily: subtitleStyle.fontFamily + ", sans-serif",
+                              fontSize,
+                              color: subtitleStyle.textColor,
+                              WebkitTextStroke: `2px ${subtitleStyle.shadowColor}`,
+                            }}
+                          >
+                            {activeSubtitle.text}
+                          </span>
+                        </motion.div>
+                      )
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
 
-                {/* Sentence-level fallback */}
-                {audioUnlocked && !useKaraoke && activeSubtitle && (
-                  <motion.div
-                    key={activeSubtitle.id}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 4 }}
-                    transition={{ duration: 0.1 }}
-                    className="absolute pointer-events-none flex justify-center"
-                    style={{ bottom: "10%", left: "10%", right: "10%" }}
-                  >
-                    <span
-                      className="subtitle-overlay"
-                      dir="rtl"
-                      style={{ fontSize: subtitleFontSize }}
-                    >
-                      {activeSubtitle.text}
-                    </span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Jump-cut white flash */}
+              {/* Jump-cut flash */}
               <AnimatePresence>
                 {jumpFlash && (
                   <motion.div
@@ -256,9 +350,7 @@ export default function VideoPreview({
                       </div>
                     </div>
                     <div className="text-center">
-                      <p className="text-white font-bold text-xl leading-snug">
-                        לחץ להפעלה עם שמע
-                      </p>
+                      <p className="text-white font-bold text-xl leading-snug">לחץ להפעלה עם שמע</p>
                       <p className="text-white/45 text-sm mt-1 flex items-center gap-1.5 justify-center">
                         <Headphones size={13} />
                         שמע מקורי + מוזיקת רקע
@@ -268,7 +360,7 @@ export default function VideoPreview({
                 </motion.div>
               )}
 
-              {/* Play/pause tap target (after unlock) */}
+              {/* Play/pause tap target */}
               {audioUnlocked && (
                 <motion.button
                   onClick={onTogglePlay}
@@ -291,12 +383,8 @@ export default function VideoPreview({
               )}
             </>
           ) : (
-            /* No file yet */
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-              <div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                style={{ background: "rgba(255,255,255,0.04)" }}
-              >
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: "rgba(255,255,255,0.04)" }}>
                 <Play size={24} className="text-white/20 ml-0.5" />
               </div>
               <p className="text-white/25 text-sm">לא הועלה וידאו</p>
@@ -308,32 +396,18 @@ export default function VideoPreview({
       {/* ── Audio visualizer bar ─────────────────────────────────────────────── */}
       <div
         className="flex items-end gap-0.5 h-10 px-3 rounded-xl shrink-0"
-        style={{
-          background: "rgba(255,255,255,0.03)",
-          border: "1px solid rgba(255,255,255,0.07)",
-        }}
+        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
       >
         <div className="flex items-center gap-1.5 shrink-0 pr-2 pb-0.5">
-          <Zap
-            size={11}
-            className={audioUnlocked && isPlaying ? "text-blue-400" : "text-white/20"}
-          />
-          <span className="text-[10px] text-white/25 font-mono">
-            {audioUnlocked && isPlaying ? "LIVE" : "IDLE"}
-          </span>
+          <Zap size={11} className={audioUnlocked && isPlaying ? "text-blue-400" : "text-white/20"} />
+          <span className="text-[10px] text-white/25 font-mono">{audioUnlocked && isPlaying ? "LIVE" : "IDLE"}</span>
         </div>
         {visData.map((h, i) => (
-          <div
-            key={i}
-            className="flex-1 rounded-t transition-all"
-            style={{
-              height: audioUnlocked && isPlaying ? `${h}px` : `${4 + Math.sin(i * 0.9) * 3}px`,
-              background: `linear-gradient(to top,
-                rgba(59,130,246,${0.5 + (i / visData.length) * 0.4}),
-                rgba(139,92,246,0.6))`,
-              transitionDuration: "60ms",
-            }}
-          />
+          <div key={i} className="flex-1 rounded-t transition-all" style={{
+            height: audioUnlocked && isPlaying ? `${h}px` : `${4 + Math.sin(i * 0.9) * 3}px`,
+            background: `linear-gradient(to top, rgba(59,130,246,${0.5 + (i / visData.length) * 0.4}), rgba(139,92,246,0.6))`,
+            transitionDuration: "60ms",
+          }} />
         ))}
         <div className="flex items-center gap-1 shrink-0 pl-2 pb-0.5">
           <Volume2 size={11} className="text-white/20" />
@@ -342,32 +416,17 @@ export default function VideoPreview({
 
       {/* ── Scrubber ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 px-1 shrink-0">
-        <button
-          onClick={onTogglePlay}
-          className="text-white/50 hover:text-white transition-colors shrink-0"
-        >
+        <button onClick={onTogglePlay} className="text-white/50 hover:text-white transition-colors shrink-0">
           {isPlaying ? <Pause size={18} /> : <Play size={18} />}
         </button>
-        <span className="text-white/30 text-xs font-mono w-10 shrink-0">
-          {fmt(currentTime)}
-        </span>
+        <span className="text-white/30 text-xs font-mono w-10 shrink-0">{fmt(currentTime)}</span>
         <input
-          type="range"
-          min={0}
-          max={duration || 100}
-          step={0.05}
-          value={currentTime}
+          type="range" min={0} max={duration || 100} step={0.05} value={currentTime}
           onChange={(e) => onSeek(Number(e.target.value))}
           className="flex-1"
-          style={{
-            background: `linear-gradient(to right,
-              rgba(139,92,246,0.75) ${progress}%,
-              rgba(255,255,255,0.1) ${progress}%)`,
-          }}
+          style={{ background: `linear-gradient(to right, rgba(139,92,246,0.75) ${progress}%, rgba(255,255,255,0.1) ${progress}%)` }}
         />
-        <span className="text-white/30 text-xs font-mono w-10 shrink-0 text-left">
-          {fmt(duration)}
-        </span>
+        <span className="text-white/30 text-xs font-mono w-10 shrink-0 text-left">{fmt(duration)}</span>
       </div>
     </div>
   );

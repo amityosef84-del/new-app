@@ -29,6 +29,25 @@ export interface Word {
   confidence: number; // 0–1
 }
 
+/** Visual style applied to the subtitle overlay */
+export interface SubtitleStyle {
+  fontFamily: string;   // "Assistant" | "Heebo" | "Rubik"
+  scale: number;        // multiplier on computed font size (0.6 – 1.8)
+  textColor: string;    // CSS hex colour for normal words
+  activeColor: string;  // CSS hex colour for the currently spoken word
+  shadowColor: string;  // CSS hex for text-shadow / stroke
+  verticalPos: number;  // top offset as % of video box height (10 – 88)
+}
+
+export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+  fontFamily:  "Heebo",
+  scale:       1,
+  textColor:   "rgba(255,255,255,0.92)",
+  activeColor: "#ffe234",
+  shadowColor: "#000000",
+  verticalPos: 78,
+};
+
 // ─── State ──────────────────────────────────────────────────────────────────────
 
 export interface EditorState {
@@ -38,6 +57,7 @@ export interface EditorState {
   subtitles: Subtitle[];
   transcript: Word[];
   transcriptionError: string | null;
+  subtitleStyle: SubtitleStyle;
   selectedTrack: string;
   videoVolume: number;
   musicVolume: number;
@@ -55,6 +75,8 @@ export type EditorAction =
   | { type: "SPLIT_CLIP"; atTime: number }
   | { type: "REMOVE_CLIP"; id: string }
   | { type: "UPDATE_SUBTITLE"; id: string; text: string }
+  | { type: "UPDATE_WORD"; id: string; text: string }
+  | { type: "SET_SUBTITLE_STYLE"; style: Partial<SubtitleStyle> }
   | { type: "SET_TRACK"; track: string }
   | { type: "SET_VIDEO_VOLUME"; v: number }
   | { type: "SET_MUSIC_VOLUME"; v: number }
@@ -122,6 +144,7 @@ const INITIAL: EditorState = {
   subtitles: [],
   transcript: [],
   transcriptionError: null,
+  subtitleStyle: DEFAULT_SUBTITLE_STYLE,
   selectedTrack: "t1",
   videoVolume: 80,
   musicVolume: 40,
@@ -166,6 +189,15 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
           s.id === action.id ? { ...s, text: action.text } : s
         ),
       };
+    case "UPDATE_WORD":
+      return {
+        ...state,
+        transcript: state.transcript.map(w =>
+          w.id === action.id ? { ...w, text: action.text } : w
+        ),
+      };
+    case "SET_SUBTITLE_STYLE":
+      return { ...state, subtitleStyle: { ...state.subtitleStyle, ...action.style } };
     case "SET_TRACK":
       return { ...state, selectedTrack: action.track };
     case "SET_VIDEO_VOLUME":
