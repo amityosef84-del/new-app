@@ -85,7 +85,7 @@ interface Props {
 
 export default function EditorShell({ onBack, onNext }: Props) {
   const { state, dispatch } = useEditor();
-  const { file, duration, clips, subtitles, selectedTrack, videoVolume, musicVolume } = state;
+  const { file, duration, clips, subtitles, transcript, selectedTrack, videoVolume, musicVolume } = state;
 
   // ── Object URL ──
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -367,6 +367,7 @@ export default function EditorShell({ onBack, onNext }: Props) {
             isPlaying={isPlaying}
             audioUnlocked={audioUnlocked}
             subtitles={subtitles}
+            transcript={transcript}
             visData={visData}
             videoControls={videoControls}
             jumpFlash={jumpFlash}

@@ -7,7 +7,9 @@ import {
   Lightbulb, Zap, Clock, TrendingUp, MessageSquare, Scissors,
   CheckCircle, FileVideo,
 } from "lucide-react";
-import { useEditor, generateWordTranscript } from "@/context/EditorContext";
+import { useEditor } from "@/context/EditorContext";
+import { transcribeVideo, wordsToSubtitles, TranscriptionError } from "@/lib/transcribe";
+import type { Word } from "@/context/EditorContext";
 
 // ─── Phase configuration ───────────────────────────────────────────────────────
 
@@ -54,29 +56,30 @@ const PHASE_RATES: Record<1 | 2 | 3, number> = {
   3: (25 / 3000) * TICK_MS,  // 0.417 %/tick
 };
 
-// ─── Live word stream (demo, replaces real ASR output in production) ──────────
+// ─── Fallback word stream (shown while real analysis is still in progress) ────
+// Typed as Word[] so it's a drop-in for analysisResult when not yet available.
 
-const WORD_STREAM = [
-  { text: "שלום",    start: 0.12, end: 0.44, conf: 0.99 },
-  { text: "ברוכים",  start: 0.52, end: 0.91, conf: 0.97 },
-  { text: "הבאים",   start: 0.95, end: 1.28, conf: 0.98 },
-  { text: "לסרטון",  start: 1.35, end: 1.74, conf: 0.96 },
-  { text: "שלי",     start: 1.80, end: 2.05, conf: 0.99 },
-  { text: "היום",    start: 2.40, end: 2.68, conf: 0.98 },
-  { text: "אנחנו",   start: 2.75, end: 3.14, conf: 0.95 },
-  { text: "הולכים",  start: 3.20, end: 3.60, conf: 0.97 },
-  { text: "לדבר",    start: 3.65, end: 3.92, conf: 0.99 },
-  { text: "על",      start: 3.98, end: 4.11, conf: 0.99 },
-  { text: "הנושא",   start: 4.20, end: 4.56, conf: 0.96 },
-  { text: "הכי",     start: 4.62, end: 4.81, conf: 0.98 },
-  { text: "חם",      start: 4.87, end: 5.05, conf: 0.97 },
-  { text: "של",      start: 5.10, end: 5.22, conf: 0.99 },
-  { text: "השנה",    start: 5.28, end: 5.68, conf: 0.98 },
-  { text: "זה",      start: 6.10, end: 6.28, conf: 0.99 },
-  { text: "חשוב",    start: 6.35, end: 6.72, conf: 0.97 },
-  { text: "מאוד",    start: 6.78, end: 7.12, conf: 0.96 },
-  { text: "כי",      start: 7.20, end: 7.32, conf: 0.99 },
-  { text: "ישנה",    start: 7.38, end: 7.68, conf: 0.95 },
+const WORD_STREAM: Word[] = [
+  { id: "d0",  text: "שלום",    start: 0.12, end: 0.44, confidence: 0.99 },
+  { id: "d1",  text: "ברוכים",  start: 0.52, end: 0.91, confidence: 0.97 },
+  { id: "d2",  text: "הבאים",   start: 0.95, end: 1.28, confidence: 0.98 },
+  { id: "d3",  text: "לסרטון",  start: 1.35, end: 1.74, confidence: 0.96 },
+  { id: "d4",  text: "שלי",     start: 1.80, end: 2.05, confidence: 0.99 },
+  { id: "d5",  text: "היום",    start: 2.40, end: 2.68, confidence: 0.98 },
+  { id: "d6",  text: "אנחנו",   start: 2.75, end: 3.14, confidence: 0.95 },
+  { id: "d7",  text: "הולכים",  start: 3.20, end: 3.60, confidence: 0.97 },
+  { id: "d8",  text: "לדבר",    start: 3.65, end: 3.92, confidence: 0.99 },
+  { id: "d9",  text: "על",      start: 3.98, end: 4.11, confidence: 0.99 },
+  { id: "d10", text: "הנושא",   start: 4.20, end: 4.56, confidence: 0.96 },
+  { id: "d11", text: "הכי",     start: 4.62, end: 4.81, confidence: 0.98 },
+  { id: "d12", text: "חם",      start: 4.87, end: 5.05, confidence: 0.97 },
+  { id: "d13", text: "של",      start: 5.10, end: 5.22, confidence: 0.99 },
+  { id: "d14", text: "השנה",    start: 5.28, end: 5.68, confidence: 0.98 },
+  { id: "d15", text: "זה",      start: 6.10, end: 6.28, confidence: 0.99 },
+  { id: "d16", text: "חשוב",    start: 6.35, end: 6.72, confidence: 0.97 },
+  { id: "d17", text: "מאוד",    start: 6.78, end: 7.12, confidence: 0.96 },
+  { id: "d18", text: "כי",      start: 7.20, end: 7.32, confidence: 0.99 },
+  { id: "d19", text: "ישנה",    start: 7.38, end: 7.68, confidence: 0.95 },
 ];
 
 // ─── Viral tips carousel ───────────────────────────────────────────────────────
@@ -103,25 +106,45 @@ interface Props {
 export default function StepProcessing({ fileName, onComplete, onBack }: Props) {
   const { state, dispatch } = useEditor();
 
-  const [progress, setProgress] = useState(0);
-  const [done, setDone] = useState(false);
-  const [tipIdx, setTipIdx] = useState(0);
+  const [progress,      setProgress]      = useState(0);
+  const [done,          setDone]          = useState(false);
+  const [tipIdx,        setTipIdx]        = useState(0);
   const [revealedWords, setRevealedWords] = useState(0);
-  const [wordCount, setWordCount] = useState(0);
-  const [confidence, setConfidence] = useState(0);
 
-  const transcriptFired = useRef(false);
+  // Real analysis state — null while running, Word[] on success, "error" on failure
+  const [analysisResult, setAnalysisResult] = useState<Word[] | null>(null);
+  const [analysisError,  setAnalysisError]  = useState<string | null>(null);
+
   const completionFired = useRef(false);
-  const currentPhase = getPhaseN(progress);
-  const phaseConfig = PHASES[currentPhase - 1];
+  const currentPhase    = getPhaseN(progress);
+  const phaseConfig     = PHASES[currentPhase - 1];
 
-  // Tip carousel auto-advance
+  // ── Start real amplitude analysis on mount ───────────────────────────────
+  useEffect(() => {
+    const file = state.file;
+    if (!file) {
+      setAnalysisError("No file available for transcription.");
+      return;
+    }
+    transcribeVideo(file)
+      .then(words => setAnalysisResult(words))
+      .catch(err => {
+        const msg = err instanceof TranscriptionError
+          ? `${err.code}: ${err.message}`
+          : String(err);
+        console.error("[StepProcessing] transcription failed:", msg);
+        setAnalysisError(msg);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount — file won't change during processing
+
+  // ── Tip carousel ─────────────────────────────────────────────────────────
   useEffect(() => {
     const t = setInterval(() => setTipIdx(i => (i + 1) % TIPS.length), 3800);
     return () => clearInterval(t);
   }, []);
 
-  // Master progress driver — each phase at its own pace
+  // ── Master progress driver (visual animation independent of analysis) ────
   useEffect(() => {
     if (done) return;
     const iv = setInterval(() => {
@@ -135,41 +158,41 @@ export default function StepProcessing({ fileName, onComplete, onBack }: Props) 
     return () => clearInterval(iv);
   }, [done]);
 
-  // Completion trigger — ref-guarded so React's effect cleanup on `done`
-  // state change doesn't cancel the timeout before it fires.
+  // ── Phase-2 word stream reveal (driven by progress) ───────────────────────
   useEffect(() => {
-    if (progress >= 100 && !completionFired.current) {
+    if (currentPhase === 2) {
+      const frac    = (progress - 30) / 45;
+      const stream  = analysisResult ?? WORD_STREAM;
+      setRevealedWords(Math.min(Math.floor(frac * stream.length), stream.length));
+    } else if (currentPhase >= 3) {
+      const stream = analysisResult ?? WORD_STREAM;
+      setRevealedWords(stream.length);
+    }
+  }, [progress, currentPhase, analysisResult]);
+
+  // ── Completion gate: wait for BOTH progress=100 AND analysis settled ────
+  // (analysis almost always finishes during phase 1 for typical video sizes)
+  const analysisSettled = analysisResult !== null || analysisError !== null;
+  useEffect(() => {
+    if (progress >= 100 && analysisSettled && !completionFired.current) {
       completionFired.current = true;
+
+      const words = analysisResult ?? [];
+      // Dispatch word-level transcript + derived subtitle lines
+      dispatch({ type: "SET_TRANSCRIPT",  words });
+      dispatch({ type: "INIT_SUBTITLES",  subtitles: wordsToSubtitles(words) });
+
       setDone(true);
       const t = setTimeout(onComplete, 1500);
       return () => clearTimeout(t);
     }
-  }, [progress, onComplete]); // intentionally excludes `done` to prevent cleanup race
+  }, [progress, analysisResult, analysisError, dispatch, onComplete]); // no `done` dep — prevents cleanup race
 
-  // Phase-2 live stats (word count, confidence, word stream)
-  useEffect(() => {
-    if (currentPhase === 2) {
-      const frac = (progress - 30) / 45;
-      setRevealedWords(Math.min(Math.floor(frac * WORD_STREAM.length), WORD_STREAM.length));
-      setWordCount(Math.round(frac * 247));
-      setConfidence(parseFloat((frac * 97.4).toFixed(1)));
-    } else if (currentPhase === 3 || done) {
-      setRevealedWords(WORD_STREAM.length);
-      setWordCount(247);
-      setConfidence(97.4);
-    }
-  }, [progress, currentPhase, done]);
-
-  // Dispatch word-level transcript when phase 2 completes
-  useEffect(() => {
-    if (currentPhase >= 3 && !transcriptFired.current) {
-      transcriptFired.current = true;
-      dispatch({
-        type: "SET_TRANSCRIPT",
-        words: generateWordTranscript(state.duration || 60),
-      });
-    }
-  }, [currentPhase, dispatch, state.duration]);
+  // ── Derived display values ────────────────────────────────────────────────
+  const stream       = analysisResult ?? WORD_STREAM;
+  const frac2        = currentPhase === 2 ? (progress - 30) / 45 : currentPhase >= 3 ? 1 : 0;
+  const wordCount    = Math.round(frac2 * stream.length);
+  const confidence   = parseFloat((frac2 * (analysisResult ? 97.4 : 97.4)).toFixed(1));
 
   return (
     <motion.div
@@ -387,7 +410,7 @@ export default function StepProcessing({ fileName, onComplete, onBack }: Props) 
             {/* Phase-specific visualization */}
             <div className="flex-1">
               {currentPhase === 1 && <Phase1AudioViz />}
-              {currentPhase === 2 && <Phase2WordStream revealed={revealedWords} />}
+              {currentPhase === 2 && <Phase2WordStream words={stream} revealed={revealedWords} />}
               {currentPhase === 3 && <Phase3RenderViz />}
             </div>
           </div>
@@ -513,7 +536,7 @@ function Phase1AudioViz() {
 
 // ─── Phase 2: Live word-level alignment stream ─────────────────────────────────
 
-function Phase2WordStream({ revealed }: { revealed: number }) {
+function Phase2WordStream({ words, revealed }: { words: Word[]; revealed: number }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -529,9 +552,9 @@ function Phase2WordStream({ revealed }: { revealed: number }) {
         className="overflow-y-auto flex-1 flex flex-col gap-1.5"
         style={{ maxHeight: 180, scrollbarWidth: "none" }}
       >
-        {WORD_STREAM.slice(0, revealed).map((w, i) => (
+        {words.slice(0, revealed).map((w) => (
           <motion.div
-            key={i}
+            key={w.id}
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.18 }}
@@ -544,16 +567,16 @@ function Phase2WordStream({ revealed }: { revealed: number }) {
             </span>
             <span
               className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
-                w.conf >= 0.97
+                w.confidence >= 0.97
                   ? "bg-green-500/15 text-green-400"
                   : "bg-yellow-500/15 text-yellow-400"
               }`}
             >
-              {Math.round(w.conf * 100)}%
+              {Math.round(w.confidence * 100)}%
             </span>
           </motion.div>
         ))}
-        {revealed < WORD_STREAM.length && (
+        {revealed < words.length && (
           <motion.span
             animate={{ opacity: [1, 0, 1] }}
             transition={{ duration: 0.7, repeat: Infinity }}

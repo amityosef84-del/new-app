@@ -5,7 +5,45 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAnimation } from "framer-motion";
 type AnimationControls = ReturnType<typeof useAnimation>;
 import { Play, Pause, Headphones, Volume2, Zap } from "lucide-react";
-import type { Subtitle } from "@/context/EditorContext";
+import type { Subtitle, Word } from "@/context/EditorContext";
+
+// ─── Karaoke helper ──────────────────────────────────────────────────────────
+
+const KARAOKE_LINE_SIZE = 4; // words per display line
+
+function getKaraokeState(
+  transcript: Word[],
+  currentTime: number,
+): { lineWords: Word[]; activeId: string | null } {
+  if (transcript.length === 0) return { lineWords: [], activeId: null };
+
+  // Find the word currently being spoken
+  const activeIdx = transcript.findIndex(
+    (w) => currentTime >= w.start && currentTime < w.end,
+  );
+
+  // If between words, anchor to the last word that already ended
+  const anchorIdx =
+    activeIdx >= 0
+      ? activeIdx
+      : Math.max(
+          0,
+          transcript.reduce(
+            (best, w, i) => (w.end <= currentTime ? i : best),
+            0,
+          ),
+        );
+
+  // Line = group of KARAOKE_LINE_SIZE words containing the anchor
+  const lineStart =
+    Math.floor(anchorIdx / KARAOKE_LINE_SIZE) * KARAOKE_LINE_SIZE;
+  const lineWords = transcript.slice(lineStart, lineStart + KARAOKE_LINE_SIZE);
+  const activeId = activeIdx >= 0 ? transcript[activeIdx].id : null;
+
+  return { lineWords, activeId };
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface Props {
   videoUrl: string | null;
@@ -15,6 +53,7 @@ interface Props {
   isPlaying: boolean;
   audioUnlocked: boolean;
   subtitles: Subtitle[];
+  transcript: Word[];
   visData: number[];
   videoControls: AnimationControls;
   jumpFlash: boolean;
@@ -30,13 +69,25 @@ interface Props {
 
 export default function VideoPreview({
   videoUrl, videoRef, currentTime, duration, isPlaying,
-  audioUnlocked, subtitles, visData, videoControls, jumpFlash,
+  audioUnlocked, subtitles, transcript, visData, videoControls, jumpFlash,
   progress, onUnlock, onTogglePlay, onSeek,
   onLoadedMetadata, onTimeUpdate, onEnded, fmt,
 }: Props) {
-  const activeSubtitle = subtitles.find(
-    (s) => currentTime >= s.startSec && currentTime < s.endSec,
-  );
+  // Prefer word-level karaoke when transcript is available;
+  // fall back to sentence-level subtitles for backward compatibility.
+  const useKaraoke = transcript.length > 0;
+  const { lineWords, activeId } = useKaraoke
+    ? getKaraokeState(transcript, currentTime)
+    : { lineWords: [], activeId: null };
+
+  // Sentence-level fallback
+  const activeSubtitle = !useKaraoke
+    ? subtitles.find((s) => currentTime >= s.startSec && currentTime < s.endSec)
+    : null;
+
+  // Key the AnimatePresence on the line's first word id so the transition
+  // fires when the line changes, not on every individual word highlight.
+  const karaokeLineKey = lineWords[0]?.id ?? "empty";
 
   return (
     <div className="flex flex-col flex-1 min-h-0 p-3 gap-3">
@@ -61,11 +112,43 @@ export default function VideoPreview({
               animate={videoControls}
             />
 
-            {/* Hebrew subtitle overlay */}
+            {/* ── Karaoke / subtitle overlay ── */}
             <AnimatePresence>
-              {activeSubtitle && audioUnlocked && (
+              {audioUnlocked && useKaraoke && lineWords.length > 0 && (
                 <motion.div
-                  key={activeSubtitle.id + activeSubtitle.text}
+                  key={karaokeLineKey}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 4 }}
+                  transition={{ duration: 0.12 }}
+                  className="absolute bottom-10 inset-x-0 flex justify-center px-4 pointer-events-none"
+                >
+                  {/*
+                    dir="rtl" + flex row → first array item appears on the RIGHT.
+                    Words are in chronological order, so word[0] (spoken first)
+                    sits at the right — correct Hebrew reading direction.
+                  */}
+                  <div dir="rtl" className="flex items-baseline justify-center gap-2 flex-wrap">
+                    {lineWords.map((word) => (
+                      <motion.span
+                        key={word.id}
+                        className="subtitle-overlay"
+                        animate={{
+                          color: word.id === activeId ? "#ffe234" : "rgba(255,255,255,0.92)",
+                        }}
+                        transition={{ duration: 0.08 }}
+                      >
+                        {word.text}
+                      </motion.span>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Sentence-level fallback (when no transcript yet) */}
+              {audioUnlocked && !useKaraoke && activeSubtitle && (
+                <motion.div
+                  key={activeSubtitle.id}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 4 }}
