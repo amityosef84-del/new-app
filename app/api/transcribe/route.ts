@@ -59,17 +59,21 @@ async function handleDeepgram(req: NextRequest, apiKey: string) {
   url.searchParams.set("words",        "true");
   url.searchParams.set("punctuate",    "true");
 
+  const contentType = file.type || "video/mp4";
+  console.log(`[Deepgram] Sending file: name=${file.name}, type=${contentType}, size=${buffer.byteLength} bytes`);
+
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: {
       Authorization: `Token ${apiKey}`,
-      "Content-Type": file.type || "audio/webm",
+      "Content-Type": contentType,
     },
     body: buffer,
   });
 
   if (!res.ok) {
     const detail = await res.text();
+    console.error(`[Deepgram] API error ${res.status}:`, detail);
     return NextResponse.json(
       { error: "Deepgram API error", detail },
       { status: res.status },
@@ -79,13 +83,20 @@ async function handleDeepgram(req: NextRequest, apiKey: string) {
   const data = await res.json() as {
     results?: {
       channels?: Array<{
-        alternatives?: Array<{ words?: DeepgramWord[] }>;
+        alternatives?: Array<{ words?: DeepgramWord[]; transcript?: string }>;
       }>;
     };
   };
 
+  const transcript = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
   const raw: DeepgramWord[] =
     data?.results?.channels?.[0]?.alternatives?.[0]?.words ?? [];
+
+  console.log(`[Deepgram] transcript: "${transcript.slice(0, 120)}"`);
+  console.log(`[Deepgram] word count: ${raw.length}`);
+  if (raw.length > 0) {
+    console.log(`[Deepgram] first word:`, raw[0]);
+  }
 
   const words = raw.map((w, i) => ({
     id:         `w${i}`,

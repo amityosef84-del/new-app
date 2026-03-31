@@ -136,7 +136,7 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
     case "INIT_CLIPS":
       return state.clips.length > 0 ? state : { ...state, clips: action.clips };
     case "INIT_SUBTITLES":
-      return state.subtitles.length > 0 ? state : { ...state, subtitles: action.subtitles };
+      return { ...state, subtitles: action.subtitles };
     case "SET_TRANSCRIPT":
       return { ...state, transcript: action.words };
     case "SET_TRANSCRIPTION_ERROR":

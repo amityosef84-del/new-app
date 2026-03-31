@@ -101,7 +101,10 @@ export default function StepProcessing({ fileName, onComplete, onBack }: Props) 
       return;
     }
     transcribeVideo(file)
-      .then(words => setAnalysisResult(words))
+      .then(words => {
+        console.log(`[StepProcessing] transcription success: ${words.length} words`, words.slice(0, 3));
+        setAnalysisResult(words);
+      })
       .catch(err => {
         const msg = err instanceof TranscriptionError
           ? `${err.code}: ${err.message}`
@@ -152,9 +155,11 @@ export default function StepProcessing({ fileName, onComplete, onBack }: Props) 
       completionFired.current = true;
 
       const words = analysisResult ?? [];
+      const subs  = wordsToSubtitles(words);
+      console.log(`[StepProcessing] completion gate fired — words: ${words.length}, subtitles: ${subs.length}`);
       // Dispatch word-level transcript + derived subtitle lines
-      dispatch({ type: "SET_TRANSCRIPT", words });
-      dispatch({ type: "INIT_SUBTITLES", subtitles: wordsToSubtitles(words) });
+      dispatch({ type: "SET_TRANSCRIPT",  words });
+      dispatch({ type: "INIT_SUBTITLES",  subtitles: subs });
       if (analysisError) {
         dispatch({ type: "SET_TRANSCRIPTION_ERROR", error: analysisError });
       }
