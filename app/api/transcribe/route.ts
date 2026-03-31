@@ -26,7 +26,7 @@ async function handleDeepgram(req: NextRequest, apiKey: string) {
   // SDK v5: constructor option key is `apiKey`
   const client = new DeepgramClient({ apiKey });
 
-  const dgParams = { model: "general", language: "he" };
+  const dgParams = { model: "nova-3", language: "he" };
   console.log("[Deepgram] request params:", JSON.stringify(dgParams));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
