@@ -31,7 +31,8 @@ async function handleDeepgram(req: NextRequest, apiKey: string) {
   try {
     response = await client.listen.v1.media.transcribeFile(
       buffer,
-      { model: "nova-2", language: "he" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { model: "general", language: "he", tier: "nova-3" } as any,
     );
   } catch (err) {
     const msg = JSON.stringify(err, Object.getOwnPropertyNames(err as object), 2);
