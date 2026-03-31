@@ -55,38 +55,33 @@ function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
 async function extractAudio(file: File): Promise<File> {
   const TARGET_RATE = 16_000; // 16 kHz — ideal for speech recognition
 
-  // 1. Decode the raw audio from the video container
+  // 1. Decode audio from the video container (any format the browser supports)
   const arrayBuffer = await file.arrayBuffer();
   const decodeCtx   = new AudioContext();
-  const audioBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
-  await decodeCtx.close();
+  let audioBuffer: AudioBuffer;
+  try {
+    audioBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
+  } finally {
+    await decodeCtx.close();
+  }
 
-  const duration   = audioBuffer.duration;
-  const numSamples = Math.ceil(duration * TARGET_RATE);
-
-  // 2. Resample to 16 kHz mono using OfflineAudioContext
+  // 2. Resample to 16 kHz mono via OfflineAudioContext
+  //    Connecting a multi-channel source to a 1-channel destination is enough —
+  //    the Web Audio spec mandates automatic stereo→mono downmix.
+  const numSamples = Math.ceil(audioBuffer.duration * TARGET_RATE);
   const offlineCtx = new OfflineAudioContext(1, numSamples, TARGET_RATE);
   const source     = offlineCtx.createBufferSource();
   source.buffer    = audioBuffer;
-
-  // Mix down to mono by splitting and merging channels
-  const merger = offlineCtx.createChannelMerger(1);
-  for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
-    const splitter = offlineCtx.createChannelSplitter(audioBuffer.numberOfChannels);
-    source.connect(splitter);
-    splitter.connect(merger, ch, 0);
-  }
-  merger.connect(offlineCtx.destination);
+  source.connect(offlineCtx.destination);
   source.start(0);
 
   const rendered = await offlineCtx.startRendering();
 
-  // 3. Encode PCM → WAV
-  const pcm = rendered.getChannelData(0);
-  const wav = encodeWav(pcm, TARGET_RATE);
-
+  // 3. Encode as 16-bit PCM WAV
+  const pcm    = rendered.getChannelData(0);
+  const wav    = encodeWav(pcm, TARGET_RATE);
   const sizeMB = (wav.byteLength / 1_048_576).toFixed(2);
-  console.log(`[extractAudio] ${duration.toFixed(1)}s → WAV ${sizeMB} MB (16 kHz mono)`);
+  console.log(`[extractAudio] ${audioBuffer.duration.toFixed(1)}s → WAV ${sizeMB} MB (16 kHz mono)`);
 
   return new File([wav], "audio.wav", { type: "audio/wav" });
 }
