@@ -26,14 +26,13 @@ async function handleDeepgram(req: NextRequest, apiKey: string) {
   // SDK v5: constructor option key is `apiKey`
   const client = new DeepgramClient({ apiKey });
 
+  const dgParams = { model: "general", language: "he" };
+  console.log("[Deepgram] request params:", JSON.stringify(dgParams));
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let response: any;
   try {
-    response = await client.listen.v1.media.transcribeFile(
-      buffer,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { model: "general", language: "he", tier: "nova-3" } as any,
-    );
+    response = await client.listen.v1.media.transcribeFile(buffer, dgParams);
   } catch (err) {
     const msg = JSON.stringify(err, Object.getOwnPropertyNames(err as object), 2);
     console.error("[Deepgram] SDK error:", msg);
