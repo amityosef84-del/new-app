@@ -59,7 +59,7 @@ async function handleDeepgram(req: NextRequest, apiKey: string) {
   url.searchParams.set("words",        "true");
   url.searchParams.set("punctuate",    "true");
 
-  const contentType = file.type || "video/mp4";
+  const contentType = file.type || "audio/wav";
   console.log(`[Deepgram] Sending file: name=${file.name}, type=${contentType}, size=${buffer.byteLength} bytes`);
 
   const res = await fetch(url.toString(), {
