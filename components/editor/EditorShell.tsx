@@ -3,9 +3,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAnimation } from "framer-motion";
 import {
-  ChevronRight, Scissors, Zap, Download,
+  ChevronRight, Scissors, Sparkles, Download, Loader2,
 } from "lucide-react";
-import { useEditor, generateClips, generateSubtitles, generateAutoJumpCuts, MUSIC_TRACKS } from "@/context/EditorContext";
+import { useEditor, generateClips, generateSubtitles, MUSIC_TRACKS } from "@/context/EditorContext";
+import { runAutoCut } from "@/lib/autocut";
 import VideoPreview from "./VideoPreview";
 import Timeline from "./Timeline";
 import SidebarPanel from "./SidebarPanel";
@@ -103,6 +104,10 @@ export default function EditorShell({ onBack, onNext }: Props) {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [visData,       setVisData]       = useState<number[]>(Array(20).fill(3));
 
+  // ── Auto-cut state ──
+  const [autoCutRunning, setAutoCutRunning] = useState(false);
+  const [removedSec,     setRemovedSec]     = useState<number | null>(null);
+
   // ── Jump-cut animation controls (passed to VideoPreview) ──
   const videoControls = useAnimation();
   const [jumpFlash,    setJumpFlash]  = useState(false);
@@ -138,7 +143,22 @@ export default function EditorShell({ onBack, onNext }: Props) {
   }, [dispatch]);
 
   const handleTimeUpdate = useCallback(() => {
-    if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+    const video = videoRef.current;
+    if (!video) return;
+    const t = video.currentTime;
+    setCurrentTime(t);
+
+    // Skip over silence gaps between clips (only during actual playback, not scrubbing)
+    if (!video.paused) {
+      const clips = stateRef.current.clips;
+      for (let i = 0; i < clips.length - 1; i++) {
+        const gapSize = clips[i + 1].startSec - clips[i].endSec;
+        if (gapSize > 0.15 && t >= clips[i].endSec && t < clips[i + 1].startSec) {
+          video.currentTime = clips[i + 1].startSec;
+          break;
+        }
+      }
+    }
   }, []);
 
   // ── Jump-cut: fires every 2.5 s of playback ──
@@ -285,10 +305,20 @@ export default function EditorShell({ onBack, onNext }: Props) {
     dispatch({ type: "SPLIT_CLIP", atTime: currentTime });
   }, [currentTime, dispatch]);
 
-  const handleAutoCut = useCallback(() => {
-    if (duration > 0)
-      dispatch({ type: "INIT_CLIPS", clips: generateAutoJumpCuts(duration) });
-  }, [duration, dispatch]);
+  const handleAutoCut = useCallback(async () => {
+    if (!file || duration === 0 || autoCutRunning) return;
+    setAutoCutRunning(true);
+    setRemovedSec(null);
+    try {
+      const result = await runAutoCut(file, duration);
+      dispatch({ type: "SET_CLIPS", clips: result.clips });
+      setRemovedSec(result.removedDuration);
+    } catch (err) {
+      console.error("[AutoCut] failed:", err);
+    } finally {
+      setAutoCutRunning(false);
+    }
+  }, [file, duration, autoCutRunning, dispatch]);
 
   const fmt = (s: number) =>
     `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
@@ -323,21 +353,35 @@ export default function EditorShell({ onBack, onNext }: Props) {
             חתוך
           </button>
 
-          {/* Auto Jump-Cut */}
+          {/* Magic Auto-Cut */}
           <button
             onClick={handleAutoCut}
-            disabled={duration === 0}
-            title="חיתוכים אוטומטיים"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all disabled:opacity-30"
+            disabled={duration === 0 || autoCutRunning}
+            title="הסר שתיקות אוטומטית"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all disabled:opacity-40"
             style={{
-              background: "linear-gradient(135deg,rgba(59,130,246,.25),rgba(139,92,246,.25))",
-              border: "1px solid rgba(139,92,246,.35)",
-              color: "#a78bfa",
+              background: autoCutRunning
+                ? "linear-gradient(135deg,rgba(234,179,8,.15),rgba(234,88,12,.15))"
+                : "linear-gradient(135deg,rgba(234,179,8,.25),rgba(234,88,12,.25))",
+              border: "1px solid rgba(234,179,8,.4)",
+              color: autoCutRunning ? "rgba(253,224,71,.55)" : "#fde047",
             }}
           >
-            <Zap size={13} />
-            Auto-Cut
+            {autoCutRunning
+              ? <Loader2 size={13} className="animate-spin" />
+              : <Sparkles size={13} />}
+            {autoCutRunning ? "מנתח…" : "Magic Auto-Cut"}
           </button>
+
+          {/* Removed-time badge */}
+          {removedSec !== null && !autoCutRunning && (
+            <span
+              className="text-[10px] font-mono px-2 py-0.5 rounded-full"
+              style={{ background: "rgba(234,179,8,.12)", color: "#fde047", border: "1px solid rgba(234,179,8,.25)" }}
+            >
+              −{removedSec.toFixed(1)}s
+            </span>
+          )}
         </div>
 
         <button

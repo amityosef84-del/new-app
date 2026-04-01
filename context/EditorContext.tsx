@@ -48,6 +48,7 @@ export type EditorAction =
   | { type: "SET_FILE"; file: File }
   | { type: "SET_DURATION"; duration: number }
   | { type: "INIT_CLIPS"; clips: Clip[] }
+  | { type: "SET_CLIPS"; clips: Clip[] }
   | { type: "INIT_SUBTITLES"; subtitles: Subtitle[] }
   | { type: "SET_TRANSCRIPT"; words: Word[] }
   | { type: "SPLIT_CLIP"; atTime: number }
@@ -158,6 +159,8 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, duration: action.duration };
     case "INIT_CLIPS":
       return state.clips.length > 0 ? state : { ...state, clips: action.clips };
+    case "SET_CLIPS":
+      return { ...state, clips: action.clips };
     case "INIT_SUBTITLES":
       return state.subtitles.length > 0 ? state : { ...state, subtitles: action.subtitles };
     case "SET_TRANSCRIPT":
