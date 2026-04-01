@@ -97,18 +97,40 @@ export default function VideoPreview({
   const karaokeLineKey = lineWords[0]?.id ?? "empty";
 
   // ── Editable word ───────────────────────────────────────────────────────────
+  // Use refs for the commit function so it never captures a stale closure,
+  // even when called from onBlur after React has re-rendered the component.
   const [editingWordId, setEditingWordId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState("");
+  const [editValue,     setEditValue]     = useState("");
+  const editingWordIdRef = useRef<string | null>(null);
+  const editValueRef     = useRef("");
 
-  const startEdit = (word: Word) => {
+  // Freeze the visible line while an edit is active so that advancing
+  // currentTime (onTimeUpdate) cannot change karaokeLineKey and unmount the input.
+  const frozenLineRef = useRef<Word[] | null>(null);
+
+  const startEdit = useCallback((word: Word) => {
+    frozenLineRef.current       = lineWords; // snapshot current line
+    editingWordIdRef.current    = word.id;
+    editValueRef.current        = word.text;
     setEditingWordId(word.id);
     setEditValue(word.text);
-  };
-  const commitEdit = () => {
-    if (editingWordId && editValue.trim()) {
-      dispatch({ type: "UPDATE_WORD", id: editingWordId, text: editValue.trim() });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineWords]);
+
+  const commitEdit = useCallback(() => {
+    const id  = editingWordIdRef.current;
+    const val = editValueRef.current.trim();
+    if (id && val) {
+      dispatch({ type: "UPDATE_WORD", id, text: val });
     }
+    frozenLineRef.current    = null;
+    editingWordIdRef.current = null;
     setEditingWordId(null);
+  }, [dispatch]);
+
+  const handleEditChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    editValueRef.current = e.target.value; // keep ref in sync for commitEdit
+    setEditValue(e.target.value);
   };
 
   // ── Draggable vertical position ─────────────────────────────────────────────
@@ -214,8 +236,10 @@ export default function VideoPreview({
                   </div>
 
                   {/* Words */}
-                  <AnimatePresence mode="wait">
+                  <AnimatePresence>
                     {useKaraoke ? (
+                      // Use frozen snapshot while editing so advancing currentTime
+                      // cannot change karaokeLineKey and destroy the active <input>.
                       <motion.div
                         key={karaokeLineKey}
                         initial={{ opacity: 0, y: 6 }}
@@ -226,28 +250,31 @@ export default function VideoPreview({
                         className="flex items-baseline justify-center gap-[0.35em] flex-wrap pointer-events-auto"
                         style={{ fontSize }}
                       >
-                        {lineWords.map((word) =>
+                        {(frozenLineRef.current ?? lineWords).map((word) =>
                           editingWordId === word.id ? (
                             <input
                               key={word.id}
                               autoFocus
                               value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
+                              onChange={handleEditChange}
                               onBlur={commitEdit}
                               onKeyDown={(e) => {
-                                if (e.key === "Enter") commitEdit();
-                                if (e.key === "Escape") setEditingWordId(null);
+                                e.stopPropagation();
+                                if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
+                                if (e.key === "Escape") { setEditingWordId(null); frozenLineRef.current = null; }
                               }}
-                              className="outline-none rounded px-1 text-center"
+                              onClick={(e) => e.stopPropagation()}
+                              className="outline-none rounded-lg px-2 text-center"
                               style={{
                                 fontFamily:  subtitleStyle.fontFamily + ", sans-serif",
                                 fontWeight:  900,
                                 fontSize:    "inherit",
                                 color:       subtitleStyle.activeColor,
-                                background:  "rgba(0,0,0,0.7)",
-                                border:      "1px solid rgba(255,226,52,0.6)",
-                                width:       `${Math.max(2, editValue.length + 1)}ch`,
-                                minWidth:    "2ch",
+                                background:  "rgba(0,0,0,0.82)",
+                                border:      "2px solid rgba(255,226,52,0.85)",
+                                boxShadow:   "0 0 12px rgba(255,226,52,0.35)",
+                                width:       `${Math.max(3, editValue.length + 2)}ch`,
+                                minWidth:    "3ch",
                               }}
                             />
                           ) : (
@@ -266,7 +293,7 @@ export default function VideoPreview({
                                   : subtitleStyle.textColor,
                               }}
                               transition={{ duration: 0.08 }}
-                              onClick={() => startEdit(word)}
+                              onClick={(e) => { e.stopPropagation(); startEdit(word); }}
                               title="לחץ לעריכה"
                             >
                               {word.text}

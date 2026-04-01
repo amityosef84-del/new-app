@@ -189,13 +189,21 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
           s.id === action.id ? { ...s, text: action.text } : s
         ),
       };
-    case "UPDATE_WORD":
-      return {
-        ...state,
-        transcript: state.transcript.map(w =>
-          w.id === action.id ? { ...w, text: action.text } : w
-        ),
-      };
+    case "UPDATE_WORD": {
+      const newTranscript = state.transcript.map(w =>
+        w.id === action.id ? { ...w, text: action.text } : w
+      );
+      // Keep subtitles in sync: find the subtitle whose time range contains
+      // this word and re-join the words that fall within it.
+      const newSubtitles = state.subtitles.map(sub => {
+        const wordsInSub = newTranscript.filter(
+          w => w.start >= sub.startSec - 0.01 && w.end <= sub.endSec + 0.01
+        );
+        if (!wordsInSub.some(w => w.id === action.id)) return sub;
+        return { ...sub, text: wordsInSub.map(w => w.text).join(" ") };
+      });
+      return { ...state, transcript: newTranscript, subtitles: newSubtitles };
+    }
     case "SET_SUBTITLE_STYLE":
       return { ...state, subtitleStyle: { ...state.subtitleStyle, ...action.style } };
     case "SET_TRACK":
