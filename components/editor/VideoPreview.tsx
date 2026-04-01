@@ -222,10 +222,9 @@ export default function VideoPreview({
                   <AnimatePresence>
                     {useKaraoke ? (
                       <div
-                        key={karaokeLineKey}
                         dir="rtl"
                         className="flex items-baseline justify-center gap-[0.35em] flex-wrap pointer-events-auto"
-                        style={{ fontSize }}
+                        style={{ fontSize, width: "100%", textAlign: "center" }}
                       >
                         {(frozenLineRef.current ?? lineWords).map((word) =>
                           editingWordId === word.id ? (

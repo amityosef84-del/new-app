@@ -60,10 +60,28 @@ export async function exportVideo(
   });
 
   // ── 2. Write source video ──────────────────────────────────────────────────
-  onProgress({ phase: "writing", percent: 8, message: "קורא קובץ וידאו…" });
+  onProgress({ phase: "writing", percent: 6, message: "קורא קובץ וידאו…" });
   await ffmpeg.writeFile("input.mp4", await fetchFile(file));
 
-  // ── 3. Generate & write SRT ────────────────────────────────────────────────
+  // ── 3. Fetch & write Hebrew font for libass ────────────────────────────────
+  // Heebo Bold TTF from Google Fonts GitHub mirror — needed for correct Hebrew
+  // character rendering and RTL layout inside FFmpeg's libass engine.
+  onProgress({ phase: "writing", percent: 9, message: "טוען פונט עברי…" });
+  let fontName = "sans-serif"; // fallback if fetch fails
+  try {
+    const fontResp = await fetch(
+      "https://raw.githubusercontent.com/google/fonts/main/ofl/heebo/static/Heebo-Bold.ttf",
+    );
+    if (fontResp.ok) {
+      const fontBytes = new Uint8Array(await fontResp.arrayBuffer());
+      await ffmpeg.writeFile("Heebo-Bold.ttf", fontBytes);
+      fontName = "Heebo";
+    }
+  } catch {
+    // Font fetch failed — libass will use its built-in fallback
+  }
+
+  // ── 4. Generate & write ASS subtitles ─────────────────────────────────────
   const sorted = [...clips].sort((a, b) => a.startSec - b.startSec);
   const srtContent = generateSrt(transcript, subtitles, sorted);
   const hasSubs = srtContent.trim().length > 0;
@@ -81,18 +99,30 @@ export async function exportVideo(
   const hasGaps = sorted.length > 1 &&
     sorted.some((c, i) => i > 0 && c.startSec > sorted[i - 1].endSec + 0.15);
 
-  // ASS force_style for subtitle burn-in
-  // MarginV is pixels from bottom (assuming ~720p baseline)
+  // ASS force_style for subtitle burn-in.
+  // - FontName references the TTF we wrote to the WASM FS (or falls back to system).
+  // - MarginV is measured from the bottom of the frame in pixels.
+  //   We approximate using a 720-line baseline; for 9:16 (1080×1920) the
+  //   proportions still hold because MarginV scales with video height in libass.
+  // - Alignment=2 = bottom-center; the user's verticalPos is reflected by MarginV.
   const marginV = Math.max(5, Math.round(720 * (1 - subtitleStyle.verticalPos / 100) - 30));
+  const primaryHex = hexToAss(
+    subtitleStyle.textColor.startsWith("rgba") ? "#ffffff" : subtitleStyle.textColor,
+  );
   const assStyle = [
+    `FontName=${fontName}`,
     "FontSize=22",
-    `PrimaryColour=&H${hexToAss(subtitleStyle.textColor.startsWith("rgba") ? "#ffffff" : subtitleStyle.textColor)}&`,
+    `PrimaryColour=&H${primaryHex}&`,
     `OutlineColour=&H${hexToAss(subtitleStyle.shadowColor)}&`,
     "Outline=2",
     "Bold=1",
     "Alignment=2",
     `MarginV=${marginV}`,
   ].join(",");
+
+  // subtitle filter string: fontsdir=. tells libass to search the WASM working
+  // directory for font files (where we wrote Heebo-Bold.ttf).
+  const subFilter = `subtitles=subs.srt:fontsdir=.:force_style='${assStyle}'`;
 
   if (hasGaps) {
     // ── Trim each talking segment, then concat ──────────────────────────────
@@ -111,7 +141,7 @@ export async function exportVideo(
     fcParts.push(`${aIn}concat=n=${n}:v=0:a=1[ac]`);
 
     if (hasSubs) {
-      fcParts.push(`[vc]subtitles=subs.srt:force_style='${assStyle}'[vout]`);
+      fcParts.push(`[vc]${subFilter}[vout]`);
       args.push("-filter_complex", fcParts.join(";"), "-map", "[vout]", "-map", "[ac]");
     } else {
       args.push("-filter_complex", fcParts.join(";"), "-map", "[vc]", "-map", "[ac]");
@@ -120,7 +150,7 @@ export async function exportVideo(
   } else {
     // ── Full video, just burn subtitles if present ──────────────────────────
     if (hasSubs) {
-      args.push("-vf", `subtitles=subs.srt:force_style='${assStyle}'`);
+      args.push("-vf", subFilter);
     }
   }
 
