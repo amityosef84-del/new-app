@@ -1,5 +1,7 @@
 import { Word, Subtitle } from "@/context/EditorContext";
 
+export const SILENCE_PAD_S = 0.3; // seconds prepended to prevent VAD clipping
+
 // ─── Error class ─────────────────────────────────────────────────────────────
 
 export class TranscriptionError extends Error {
@@ -78,8 +80,13 @@ async function extractAudio(file: File): Promise<File> {
   const rendered = await offlineCtx.startRendering();
 
   // 3. Encode as 16-bit PCM WAV
-  const pcm    = rendered.getChannelData(0);
-  const wav    = encodeWav(pcm, TARGET_RATE);
+  const pcm = rendered.getChannelData(0);
+
+  // Prepend silence so Deepgram VAD doesn't clip the first word
+  const padFrames = Math.ceil(SILENCE_PAD_S * TARGET_RATE);
+  const padded    = new Float32Array(padFrames + pcm.length);
+  padded.set(pcm, padFrames);          // original audio starts after the pad
+  const wav    = encodeWav(padded, TARGET_RATE);
   const sizeMB = (wav.byteLength / 1_048_576).toFixed(2);
   console.log(`[extractAudio] ${audioBuffer.duration.toFixed(1)}s → WAV ${sizeMB} MB (16 kHz mono)`);
 

@@ -186,24 +186,24 @@ export default function VideoPreview({
               />
 
               {/* ── Subtitle / karaoke overlay (draggable) ──────────────────── */}
-              {(audioUnlocked || !videoUrl) && (useKaraoke ? lineWords.length > 0 : !!activeSubtitle) && (
+              {videoUrl && (useKaraoke ? lineWords.length > 0 : !!activeSubtitle) && (
                 <div
                   ref={dragHandleRef}
-                  className="absolute inset-x-0 flex flex-col items-center pointer-events-none"
+                  className="absolute inset-x-0 flex flex-col items-center cursor-move"
                   style={{
                     top: subtitleTopStyle,
                     transform: "translateY(-50%)",
                     paddingLeft:  "10%",
                     paddingRight: "10%",
+                    zIndex: 20,
                   }}
                 >
                   {/* Drag handle — only visible on hover, pointer-events re-enabled */}
                   <div
-                    className="pointer-events-auto mb-1 flex items-center gap-1 px-2 py-0.5 rounded-full opacity-0 hover:opacity-100 transition-opacity"
+                    className="pointer-events-auto mb-1 flex items-center gap-1 px-2 py-0.5 rounded-full opacity-40 hover:opacity-100 transition-opacity"
                     style={{
                       background: "rgba(0,0,0,0.55)",
                       cursor: isDragging ? "grabbing" : "grab",
-                      opacity: isDragging ? 1 : undefined,
                     }}
                     onPointerDown={onDragPointerDown}
                     onPointerMove={onDragPointerMove}
@@ -368,6 +368,7 @@ export default function VideoPreview({
                   animate={{ opacity: isPlaying ? 0 : 1 }}
                   whileHover={{ opacity: 1 }}
                   transition={{ duration: 0.2 }}
+                  style={{ pointerEvents: isPlaying ? "none" : "auto" }}
                 >
                   <div
                     className="w-14 h-14 rounded-full flex items-center justify-center"

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DeepgramClient } from "@deepgram/sdk";
 
+const SILENCE_PAD_S = 0.3;
+
 export async function POST(req: NextRequest) {
   const deepgramKey = process.env.DEEPGRAM_API_KEY?.trim();
   const openaiKey   = process.env.OPENAI_API_KEY?.trim();
@@ -56,8 +58,8 @@ async function handleDeepgram(req: NextRequest, apiKey: string) {
   const words = (alt.words ?? []).map((w: any, i: number) => ({
     id:         `w${i}`,
     text:       w.word ?? "",
-    start:      w.start      ?? 0,
-    end:        w.end        ?? 0,
+    start:      Math.max(0, (w.start ?? 0) - SILENCE_PAD_S),
+    end:        Math.max(0, (w.end   ?? 0) - SILENCE_PAD_S),
     confidence: w.confidence ?? 0.9,
   }));
 
