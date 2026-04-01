@@ -15,7 +15,7 @@ interface AutoCutOptions {
   minSilenceDuration?: number;
   /** Analysis window size in milliseconds. Default 50. */
   windowMs?: number;
-  /** How many ms of audio to preserve before / after each silence boundary. Default 120. */
+  /** How many ms of audio to preserve before / after each silence boundary. Default 50. */
   paddingMs?: number;
 }
 

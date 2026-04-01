@@ -2,8 +2,6 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useAnimation } from "framer-motion";
-type AnimationControls = ReturnType<typeof useAnimation>;
 import { Play, Pause, Headphones, Volume2, Zap, GripVertical } from "lucide-react";
 import type { Subtitle, Word } from "@/context/EditorContext";
 import { useEditor } from "@/context/EditorContext";
@@ -42,8 +40,6 @@ interface Props {
   subtitles: Subtitle[];
   transcript: Word[];
   visData: number[];
-  videoControls: AnimationControls;
-  jumpFlash: boolean;
   progress: number;
   onUnlock: () => void;
   onTogglePlay: () => void;
@@ -56,7 +52,7 @@ interface Props {
 
 export default function VideoPreview({
   videoUrl, videoRef, currentTime, duration, isPlaying,
-  audioUnlocked, subtitles, transcript, visData, videoControls, jumpFlash,
+  audioUnlocked, subtitles, transcript, visData,
   progress, onUnlock, onTogglePlay, onSeek,
   onLoadedMetadata, onTimeUpdate, onEnded, fmt,
 }: Props) {
@@ -185,16 +181,13 @@ export default function VideoPreview({
         >
           {videoUrl ? (
             <>
-              <motion.video
+              <video
                 ref={videoRef as React.RefObject<HTMLVideoElement>}
                 src={videoUrl}
                 className="w-full h-full object-contain"
                 onLoadedMetadata={handleLoadedMetadata}
                 onTimeUpdate={onTimeUpdate}
-                onPlay={() => {}}
-                onPause={() => {}}
                 onEnded={onEnded}
-                animate={videoControls}
               />
 
               {/* ── Subtitle / karaoke overlay (draggable) ──────────────────── */}
@@ -228,12 +221,8 @@ export default function VideoPreview({
                   {/* Words */}
                   <AnimatePresence>
                     {useKaraoke ? (
-                      <motion.div
+                      <div
                         key={karaokeLineKey}
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 4 }}
-                        transition={{ duration: 0.12 }}
                         dir="rtl"
                         className="flex items-baseline justify-center gap-[0.35em] flex-wrap pointer-events-auto"
                         style={{ fontSize }}
@@ -288,15 +277,11 @@ export default function VideoPreview({
                             </motion.span>
                           )
                         )}
-                      </motion.div>
+                      </div>
                     ) : (
                       activeSubtitle && (
-                        <motion.div
+                        <div
                           key={activeSubtitle.id}
-                          initial={{ opacity: 0, y: 6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 4 }}
-                          transition={{ duration: 0.1 }}
                           className="pointer-events-auto"
                         >
                           <span
@@ -311,24 +296,12 @@ export default function VideoPreview({
                           >
                             {activeSubtitle.text}
                           </span>
-                        </motion.div>
+                        </div>
                       )
                     )}
                   </AnimatePresence>
                 </div>
               )}
-
-              {/* Jump-cut flash */}
-              <AnimatePresence>
-                {jumpFlash && (
-                  <motion.div
-                    initial={{ opacity: 0.28 }}
-                    animate={{ opacity: 0 }}
-                    transition={{ duration: 0.38 }}
-                    className="absolute inset-0 bg-white pointer-events-none"
-                  />
-                )}
-              </AnimatePresence>
 
               {/* Audio unlock overlay */}
               {!audioUnlocked && (

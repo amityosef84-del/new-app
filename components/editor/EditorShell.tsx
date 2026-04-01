@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useAnimation } from "framer-motion";
 import {
   ChevronRight, Scissors, Sparkles, Download, Loader2,
 } from "lucide-react";
@@ -108,11 +107,6 @@ export default function EditorShell({ onBack, onNext }: Props) {
   const [autoCutRunning, setAutoCutRunning] = useState(false);
   const [removedSec,     setRemovedSec]     = useState<number | null>(null);
 
-  // ── Jump-cut animation controls (passed to VideoPreview) ──
-  const videoControls = useAnimation();
-  const [jumpFlash,    setJumpFlash]  = useState(false);
-  const lastJumpRef    = useRef(-3);
-
   // ── Audio refs ──
   const audioCtxRef    = useRef<AudioContext | null>(null);
   const videoGainRef   = useRef<GainNode | null>(null);
@@ -160,26 +154,6 @@ export default function EditorShell({ onBack, onNext }: Props) {
       }
     }
   }, []);
-
-  // ── Jump-cut: fires every 2.5 s of playback ──
-  useEffect(() => {
-    if (!isPlaying || currentTime - lastJumpRef.current < 2.5) return;
-    lastJumpRef.current = currentTime;
-    const positions = [
-      { scale: 1.11, x: -12, y: -5 },
-      { scale: 1.10, x:  12, y: -4 },
-      { scale: 1.09, x:   0, y:-10 },
-      { scale: 1.11, x:  -8, y:  6 },
-      { scale: 1.10, x:  10, y:  4 },
-    ];
-    const p = positions[Math.floor(Math.random() * positions.length)];
-    videoControls.start({ scale: p.scale, x: p.x, y: p.y, transition: { duration: 0.13 } });
-    setJumpFlash(true);
-    setTimeout(() => {
-      videoControls.start({ scale: 1, x: 0, y: 0, transition: { duration: 0.32, ease: "easeOut" } });
-      setJumpFlash(false);
-    }, 380);
-  }, [currentTime, isPlaying, videoControls]);
 
   // ── Volume sync ──
   useEffect(() => { if (videoGainRef.current) videoGainRef.current.gain.value = videoVolume / 100; }, [videoVolume]);
@@ -270,7 +244,6 @@ export default function EditorShell({ onBack, onNext }: Props) {
 
     setIsPlaying(true);
     setAudioUnlocked(true);
-    lastJumpRef.current = -3;
 
     startScheduler(ctx, musicGain, stateRef.current.selectedTrack);
     startVisualizer(analyser);
@@ -298,7 +271,6 @@ export default function EditorShell({ onBack, onNext }: Props) {
     const clamped = Math.max(0, Math.min(duration, t));
     video.currentTime = clamped;
     setCurrentTime(clamped);
-    lastJumpRef.current = clamped - 3;
   }, [duration]);
 
   const handleSplit = useCallback(() => {
@@ -413,8 +385,6 @@ export default function EditorShell({ onBack, onNext }: Props) {
             subtitles={subtitles}
             transcript={transcript}
             visData={visData}
-            videoControls={videoControls}
-            jumpFlash={jumpFlash}
             progress={progress}
             onUnlock={handleUnlockAudio}
             onTogglePlay={togglePlay}
