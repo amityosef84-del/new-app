@@ -85,10 +85,10 @@ export type EditorAction =
 // ─── Constants ──────────────────────────────────────────────────────────────────
 
 export const MUSIC_TRACKS = [
-  { id: "t1", name: "Lo-Fi Chill Beats",   genre: "Lo-Fi",     bpm: 85  },
-  { id: "t2", name: "Epic Motivational",   genre: "Cinematic", bpm: 128 },
-  { id: "t3", name: "Upbeat Pop Vibes",    genre: "Pop",       bpm: 110 },
-  { id: "t4", name: "Deep Focus",          genre: "Ambient",   bpm: 70  },
+  { id: "t1", name: "Viral / Upbeat",    genre: "Lo-Fi",    bpm: 85  },
+  { id: "t2", name: "Professional",      genre: "Cinematic",bpm: 128 },
+  { id: "t3", name: "Upbeat Pop",        genre: "Pop",      bpm: 110 },
+  { id: "t4", name: "Chill / Minimal",   genre: "Ambient",  bpm: 70  },
 ] as const;
 
 export const CLIP_COLORS = [

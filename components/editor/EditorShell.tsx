@@ -2,10 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
-  ChevronRight, Scissors, Sparkles, Download, Loader2,
+  ChevronRight, Scissors, Sparkles, Download, Loader2, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import { useEditor, generateClips, generateSubtitles, MUSIC_TRACKS } from "@/context/EditorContext";
 import { runAutoCut } from "@/lib/autocut";
+import { exportVideo, type ExportProgress } from "@/lib/export";
 import VideoPreview from "./VideoPreview";
 import Timeline from "./Timeline";
 import SidebarPanel from "./SidebarPanel";
@@ -107,6 +108,10 @@ export default function EditorShell({ onBack, onNext }: Props) {
   const [autoCutRunning, setAutoCutRunning] = useState(false);
   const [removedSec,     setRemovedSec]     = useState<number | null>(null);
 
+  // ── Export state ──
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
+  const exportResultRef = useRef<{ videoUrl: string; srtContent: string } | null>(null);
+
   // ── Audio refs ──
   const audioCtxRef    = useRef<AudioContext | null>(null);
   const videoGainRef   = useRef<GainNode | null>(null);
@@ -157,7 +162,7 @@ export default function EditorShell({ onBack, onNext }: Props) {
 
   // ── Volume sync ──
   useEffect(() => { if (videoGainRef.current) videoGainRef.current.gain.value = videoVolume / 100; }, [videoVolume]);
-  useEffect(() => { if (musicGainRef.current) musicGainRef.current.gain.value = (musicVolume / 100) * 0.28; }, [musicVolume]);
+  useEffect(() => { if (musicGainRef.current) musicGainRef.current.gain.value = (musicVolume / 100) * 0.12; }, [musicVolume]);
 
   // ── Restart music scheduler when track changes ──
   useEffect(() => {
@@ -232,7 +237,7 @@ export default function EditorShell({ onBack, onNext }: Props) {
     videoGain.connect(masterGain);
 
     const musicGain = ctx.createGain();
-    musicGain.gain.value = (stateRef.current.musicVolume / 100) * 0.28;
+    musicGain.gain.value = (stateRef.current.musicVolume / 100) * 0.12;
     musicGainRef.current = musicGain;
     musicGain.connect(masterGain);
 
@@ -291,6 +296,27 @@ export default function EditorShell({ onBack, onNext }: Props) {
       setAutoCutRunning(false);
     }
   }, [file, duration, autoCutRunning, dispatch]);
+
+  const handleExport = useCallback(async () => {
+    const { file, clips, transcript, subtitles, subtitleStyle } = stateRef.current;
+    if (!file || exportProgress?.phase === "loading" || exportProgress?.phase === "encoding") return;
+    exportResultRef.current = null;
+    setExportProgress({ phase: "loading", percent: 0, message: "מתחיל…" });
+    try {
+      const result = await exportVideo(file, clips, transcript, subtitles, subtitleStyle, setExportProgress);
+      exportResultRef.current = result;
+    } catch (err) {
+      console.error("[Export]", err);
+      setExportProgress({ phase: "error", percent: 0, message: String(err) });
+    }
+  }, [exportProgress]);
+
+  const triggerDownload = useCallback((url: string, filename: string) => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+  }, []);
 
   const fmt = (s: number) =>
     `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
@@ -357,16 +383,18 @@ export default function EditorShell({ onBack, onNext }: Props) {
         </div>
 
         <button
-          onClick={onNext}
-          className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold transition-all"
+          onClick={handleExport}
+          disabled={!file || exportProgress?.phase === "loading" || exportProgress?.phase === "encoding"}
+          className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-50"
           style={{
             background: "linear-gradient(135deg,#3b82f6,#8b5cf6)",
             boxShadow: "0 0 20px rgba(59,130,246,.35)",
             color: "#fff",
           }}
         >
-          ייצא
-          <Download size={13} />
+          {exportProgress?.phase === "loading" || exportProgress?.phase === "encoding"
+            ? <><Loader2 size={13} className="animate-spin" />מרנדר…</>
+            : <><Download size={13} />ייצא MP4</>}
         </button>
       </div>
 
@@ -410,6 +438,115 @@ export default function EditorShell({ onBack, onNext }: Props) {
         onSeek={handleSeek}
         fmt={fmt}
       />
+
+      {/* ── Export progress overlay ── */}
+      {exportProgress && exportProgress.phase !== "done" && exportProgress.phase !== "error" && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ background: "rgba(8,11,20,0.88)", backdropFilter: "blur(12px)" }}
+        >
+          <div
+            className="flex flex-col items-center gap-5 p-8 rounded-2xl w-80"
+            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            <Loader2 size={36} className="animate-spin text-blue-400" />
+            <div className="w-full text-center">
+              <p className="text-white font-semibold mb-1">{exportProgress.message}</p>
+              <p className="text-white/40 text-xs mb-3">אל תסגור את הדפדפן</p>
+              {/* Progress bar */}
+              <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.1)" }}>
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${exportProgress.percent}%`,
+                    background: "linear-gradient(to right,#3b82f6,#8b5cf6)",
+                  }}
+                />
+              </div>
+              <p className="text-white/30 text-xs mt-1.5 font-mono">{exportProgress.percent}%</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Export done modal ── */}
+      {exportProgress?.phase === "done" && exportResultRef.current && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ background: "rgba(8,11,20,0.88)", backdropFilter: "blur(12px)" }}
+        >
+          <div
+            className="flex flex-col items-center gap-5 p-8 rounded-2xl w-80"
+            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            <CheckCircle2 size={40} className="text-green-400" />
+            <div className="text-center">
+              <p className="text-white font-bold text-lg mb-1">הרינדור הושלם!</p>
+              <p className="text-white/40 text-xs">הורד את הוידאו והכתוביות</p>
+            </div>
+            <div className="flex flex-col gap-2 w-full">
+              <button
+                onClick={() => {
+                  triggerDownload(exportResultRef.current!.videoUrl, "edited-video.mp4");
+                }}
+                className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold"
+                style={{ background: "linear-gradient(135deg,#3b82f6,#8b5cf6)", color: "#fff" }}
+              >
+                <Download size={15} />
+                הורד MP4
+              </button>
+              {exportResultRef.current.srtContent && (
+                <button
+                  onClick={() => {
+                    const blob = new Blob([exportResultRef.current!.srtContent], { type: "text/plain" });
+                    triggerDownload(URL.createObjectURL(blob), "subtitles.srt");
+                  }}
+                  className="flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-medium"
+                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.6)" }}
+                >
+                  <Download size={12} />
+                  הורד כתוביות SRT
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (exportResultRef.current?.videoUrl) URL.revokeObjectURL(exportResultRef.current.videoUrl);
+                  exportResultRef.current = null;
+                  setExportProgress(null);
+                }}
+                className="text-white/30 text-xs hover:text-white/60 transition-colors mt-1"
+              >
+                סגור
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Export error modal ── */}
+      {exportProgress?.phase === "error" && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ background: "rgba(8,11,20,0.88)", backdropFilter: "blur(12px)" }}
+        >
+          <div
+            className="flex flex-col items-center gap-4 p-8 rounded-2xl w-80"
+            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(239,68,68,0.3)" }}
+          >
+            <AlertCircle size={36} className="text-red-400" />
+            <div className="text-center">
+              <p className="text-white font-semibold mb-1">הרינדור נכשל</p>
+              <p className="text-white/40 text-xs break-all">{exportProgress.message}</p>
+            </div>
+            <button
+              onClick={() => setExportProgress(null)}
+              className="text-white/40 text-xs hover:text-white/70 transition-colors"
+            >
+              סגור
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

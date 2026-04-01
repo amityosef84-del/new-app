@@ -293,7 +293,7 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
               exit={{ opacity: 0, y: -6 }}
               className="flex flex-col gap-3"
             >
-              {/* Music on/off */}
+              {/* Music on/off + auto-duck badge */}
               <div
                 className="flex items-center justify-between p-3 rounded-xl"
                 style={{
@@ -309,8 +309,17 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
                   )}
                   <div>
                     <p className="text-white/70 text-xs font-medium">מוזיקת רקע</p>
-                    <p className="text-white/30 text-[10px]">
-                      {musicEnabled ? "מנגן בתצוגה מקדימה" : "כבוי"}
+                    <p className="text-white/30 text-[10px] flex items-center gap-1">
+                      {musicEnabled ? (
+                        <>
+                          <span
+                            className="px-1.5 py-0.5 rounded-full text-[9px] font-mono"
+                            style={{ background: "rgba(34,197,94,.15)", color: "#86efac", border: "1px solid rgba(34,197,94,.25)" }}
+                          >
+                            Auto-Duck 12%
+                          </span>
+                        </>
+                      ) : "כבוי"}
                     </p>
                   </div>
                 </div>
@@ -339,9 +348,12 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
                   border: "1px solid rgba(255,255,255,0.07)",
                 }}
               >
-                <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1">
-                  <Volume2 size={10} /> מיקסר
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1">
+                    <Volume2 size={10} /> מיקסר
+                  </p>
+                  <span className="text-[9px] text-white/20">תצוגה מקדימה בלבד</span>
+                </div>
 
                 {/* Video volume */}
                 <div>
