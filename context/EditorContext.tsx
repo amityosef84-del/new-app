@@ -29,6 +29,26 @@ export interface Word {
   confidence: number; // 0–1
 }
 
+// ─── Subtitle style ──────────────────────────────────────────────────────────────
+
+export interface SubtitleStyle {
+  fontFamily: string;
+  scale: number;        // 0.6–1.8 multiplier on top of responsive base size
+  textColor: string;
+  activeColor: string;
+  shadowColor: string;
+  verticalPos: number;  // top % of video box (5–88)
+}
+
+export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+  fontFamily:  "Heebo",
+  scale:       1,
+  textColor:   "rgba(255,255,255,0.92)",
+  activeColor: "#ffe234",
+  shadowColor: "#000000",
+  verticalPos: 78,
+};
+
 // ─── State ──────────────────────────────────────────────────────────────────────
 
 export interface EditorState {
@@ -37,6 +57,7 @@ export interface EditorState {
   clips: Clip[];
   subtitles: Subtitle[];
   transcript: Word[];
+  subtitleStyle: SubtitleStyle;
   selectedTrack: string;
   videoVolume: number;
   musicVolume: number;
@@ -54,6 +75,8 @@ export type EditorAction =
   | { type: "SPLIT_CLIP"; atTime: number }
   | { type: "REMOVE_CLIP"; id: string }
   | { type: "UPDATE_SUBTITLE"; id: string; text: string }
+  | { type: "UPDATE_WORD"; id: string; text: string }
+  | { type: "SET_SUBTITLE_STYLE"; style: Partial<SubtitleStyle> }
   | { type: "SET_TRACK"; track: string }
   | { type: "SET_VIDEO_VOLUME"; v: number }
   | { type: "SET_MUSIC_VOLUME"; v: number }
@@ -146,6 +169,7 @@ const INITIAL: EditorState = {
   clips: [],
   subtitles: [],
   transcript: [],
+  subtitleStyle: DEFAULT_SUBTITLE_STYLE,
   selectedTrack: "t1",
   videoVolume: 80,
   musicVolume: 40,
@@ -190,6 +214,22 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
           s.id === action.id ? { ...s, text: action.text } : s
         ),
       };
+    case "UPDATE_WORD": {
+      const newTranscript = state.transcript.map(w =>
+        w.id === action.id ? { ...w, text: action.text } : w
+      );
+      // Re-join the subtitle that contains this word
+      const newSubtitles = state.subtitles.map(sub => {
+        const wordsInSub = newTranscript.filter(
+          w => w.start >= sub.startSec - 0.01 && w.end <= sub.endSec + 0.01
+        );
+        if (!wordsInSub.some(w => w.id === action.id)) return sub;
+        return { ...sub, text: wordsInSub.map(w => w.text).join(" ") };
+      });
+      return { ...state, transcript: newTranscript, subtitles: newSubtitles };
+    }
+    case "SET_SUBTITLE_STYLE":
+      return { ...state, subtitleStyle: { ...state.subtitleStyle, ...action.style } };
     case "SET_TRACK":
       return { ...state, selectedTrack: action.track };
     case "SET_VIDEO_VOLUME":

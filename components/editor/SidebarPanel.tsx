@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  AlignRight, Music, Sparkles,
+  AlignRight, Music, Sparkles, Palette,
   Volume2, VolumeX, Check, Zap,
 } from "lucide-react";
 import { useEditor, MUSIC_TRACKS } from "@/context/EditorContext";
@@ -14,7 +14,7 @@ interface Props {
   onSeek: (t: number) => void;
 }
 
-type Tab = "subtitles" | "audio" | "effects";
+type Tab = "subtitles" | "style" | "audio" | "effects";
 
 const EFFECTS = [
   { id: "zoom",  label: "Zoom Punch",  icon: "🔍", desc: "הגדלה פתאומית" },
@@ -23,9 +23,11 @@ const EFFECTS = [
   { id: "speed", label: "Speed Ramp",  icon: "⚡", desc: "שינוי מהירות"  },
 ];
 
+const FONTS = ["Heebo", "Assistant", "Rubik"] as const;
+
 export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) {
   const { state, dispatch } = useEditor();
-  const { subtitles, selectedTrack, videoVolume, musicVolume } = state;
+  const { subtitles, subtitleStyle, selectedTrack, videoVolume, musicVolume } = state;
 
   const [activeTab,    setActiveTab]    = useState<Tab>("subtitles");
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
@@ -33,6 +35,7 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
 
   const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: "subtitles", label: "כתוביות", icon: AlignRight },
+    { id: "style",     label: "סגנון",   icon: Palette    },
     { id: "audio",     label: "אודיו",   icon: Music      },
     { id: "effects",   label: "אפקטים",  icon: Sparkles   },
   ];
@@ -183,6 +186,101 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
                   </motion.div>
                 );
               })}
+            </motion.div>
+          )}
+
+          {/* ── Style ── */}
+          {activeTab === "style" && (
+            <motion.div
+              key="style"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="flex flex-col gap-4"
+            >
+              {/* Font */}
+              <div>
+                <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider mb-2">פונט</p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {FONTS.map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => dispatch({ type: "SET_SUBTITLE_STYLE", style: { fontFamily: f } })}
+                      className="py-2 rounded-xl text-xs transition-all"
+                      style={{
+                        fontFamily: f + ", sans-serif",
+                        fontWeight: 700,
+                        background: subtitleStyle.fontFamily === f
+                          ? "rgba(139,92,246,0.2)"
+                          : "rgba(255,255,255,0.04)",
+                        border: subtitleStyle.fontFamily === f
+                          ? "1px solid rgba(139,92,246,0.5)"
+                          : "1px solid rgba(255,255,255,0.08)",
+                        color: subtitleStyle.fontFamily === f ? "#c4b5fd" : "rgba(255,255,255,0.45)",
+                      }}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Size */}
+              <div>
+                <div className="flex justify-between mb-1.5">
+                  <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider">גודל</p>
+                  <span className="text-white/30 text-[10px] font-mono">{Math.round(subtitleStyle.scale * 100)}%</span>
+                </div>
+                <input
+                  type="range" min={50} max={180} step={5}
+                  value={Math.round(subtitleStyle.scale * 100)}
+                  onChange={(e) => dispatch({ type: "SET_SUBTITLE_STYLE", style: { scale: Number(e.target.value) / 100 } })}
+                  className="w-full"
+                  style={{
+                    background: `linear-gradient(to right, rgba(139,92,246,0.7) ${((subtitleStyle.scale - 0.5) / 1.3) * 100}%, rgba(255,255,255,0.1) ${((subtitleStyle.scale - 0.5) / 1.3) * 100}%)`,
+                  }}
+                />
+              </div>
+
+              {/* Position */}
+              <div>
+                <div className="flex justify-between mb-1.5">
+                  <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider">מיקום אנכי</p>
+                  <span className="text-white/30 text-[10px] font-mono">{Math.round(subtitleStyle.verticalPos)}%</span>
+                </div>
+                <input
+                  type="range" min={5} max={88} step={1}
+                  value={subtitleStyle.verticalPos}
+                  onChange={(e) => dispatch({ type: "SET_SUBTITLE_STYLE", style: { verticalPos: Number(e.target.value) } })}
+                  className="w-full"
+                  style={{
+                    background: `linear-gradient(to right, rgba(59,130,246,0.7) ${((subtitleStyle.verticalPos - 5) / 83) * 100}%, rgba(255,255,255,0.1) ${((subtitleStyle.verticalPos - 5) / 83) * 100}%)`,
+                  }}
+                />
+              </div>
+
+              {/* Colors */}
+              <div>
+                <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider mb-2">צבעים</p>
+                <div className="flex flex-col gap-2">
+                  {([
+                    { key: "textColor",   label: "טקסט" },
+                    { key: "activeColor", label: "מודגש" },
+                    { key: "shadowColor", label: "צל" },
+                  ] as const).map(({ key, label }) => (
+                    <label key={key} className="flex items-center justify-between">
+                      <span className="text-white/50 text-xs">{label}</span>
+                      <input
+                        type="color"
+                        value={subtitleStyle[key].startsWith("rgba") ? "#ffffff" : subtitleStyle[key]}
+                        onChange={(e) => dispatch({ type: "SET_SUBTITLE_STYLE", style: { [key]: e.target.value } })}
+                        className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent"
+                        style={{ padding: "2px" }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
             </motion.div>
           )}
 

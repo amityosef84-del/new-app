@@ -1,5 +1,64 @@
 import { Word, Subtitle } from "@/context/EditorContext";
 
+// ─── Audio extraction with silence padding ────────────────────────────────────
+
+export const SILENCE_PAD_S = 0.3;
+const TARGET_RATE = 16_000;
+
+function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
+  const dataBytes = samples.length * 2;
+  const buf  = new ArrayBuffer(44 + dataBytes);
+  const view = new DataView(buf);
+  const str  = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); view.setUint32(4, 36 + dataBytes, true); str(8, "WAVE");
+  str(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  str(36, "data"); view.setUint32(40, dataBytes, true);
+  let off = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    off += 2;
+  }
+  return new Uint8Array(buf);
+}
+
+export async function extractAudio(file: File): Promise<Blob> {
+  const arrayBuffer = await file.arrayBuffer();
+  const AudioCtx: typeof AudioContext =
+    window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext!;
+
+  const decodeCtx = new AudioCtx();
+  let srcBuffer: AudioBuffer;
+  try {
+    srcBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
+  } finally {
+    await decodeCtx.close();
+  }
+
+  // Resample to 16 kHz mono via OfflineAudioContext
+  const offlineCtx = new OfflineAudioContext(
+    1,
+    Math.ceil(srcBuffer.duration * TARGET_RATE),
+    TARGET_RATE,
+  );
+  const source = offlineCtx.createBufferSource();
+  source.buffer = srcBuffer;
+  source.connect(offlineCtx.destination);
+  source.start(0);
+  const resampled = await offlineCtx.startRendering();
+  const pcm = resampled.getChannelData(0);
+
+  // Prepend silence pad so Deepgram VAD doesn't clip the first word
+  const padFrames = Math.ceil(SILENCE_PAD_S * TARGET_RATE);
+  const padded = new Float32Array(padFrames + pcm.length);
+  padded.set(pcm, padFrames);
+
+  const wav = encodeWav(padded, TARGET_RATE);
+  return new Blob([wav.buffer as ArrayBuffer], { type: "audio/wav" });
+}
+
 // ─── VOCAB ───────────────────────────────────────────────────────────────────
 
 const VOCAB: string[] = [
@@ -222,14 +281,16 @@ export async function transcribeVideo(file: File): Promise<Word[]> {
   let response: Response;
 
   try {
+    // Extract 16 kHz mono WAV with 300ms silence prefix (prevents Deepgram VAD clipping)
+    const audioBlob = await extractAudio(file);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", audioBlob, "audio.wav");
     response = await fetch("/api/transcribe", {
       method: "POST",
       body: formData,
     });
   } catch {
-    // Network error — fall back silently
+    // Network error or decode failure — fall back silently
     return runAmplitudeAnalysis(file);
   }
 

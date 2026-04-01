@@ -33,7 +33,9 @@ export async function POST(req: NextRequest) {
   return handleWhisper(req, openaiKey!);
 }
 
-// ─── Deepgram Nova-2 ──────────────────────────────────────────────────────────
+// ─── Deepgram Nova-3 (Hebrew requires nova-3) ────────────────────────────────
+
+const SILENCE_PAD_S = 0.3; // must match lib/transcribe.ts extractAudio
 
 interface DeepgramWord {
   word: string;
@@ -52,8 +54,8 @@ async function handleDeepgram(req: NextRequest, apiKey: string) {
   const buffer = await file.arrayBuffer();
 
   const url = new URL("https://api.deepgram.com/v1/listen");
-  url.searchParams.set("model",        "nova-2");
-  url.searchParams.set("language",     "he");        // Hebrew
+  url.searchParams.set("model",        "nova-3");
+  url.searchParams.set("language",     "he");        // Hebrew (nova-3 required)
   url.searchParams.set("smart_format", "true");
   url.searchParams.set("utterances",   "true");
   url.searchParams.set("words",        "true");
@@ -87,11 +89,13 @@ async function handleDeepgram(req: NextRequest, apiKey: string) {
   const raw: DeepgramWord[] =
     data?.results?.channels?.[0]?.alternatives?.[0]?.words ?? [];
 
+  // Subtract the silence pad we prepended on the client so timestamps
+  // align with the original video rather than the padded WAV.
   const words = raw.map((w, i) => ({
     id:         `w${i}`,
     text:       w.word,
-    start:      w.start,
-    end:        w.end,
+    start:      Math.max(0, (w.start ?? 0) - SILENCE_PAD_S),
+    end:        Math.max(0, (w.end   ?? 0) - SILENCE_PAD_S),
     confidence: w.confidence,
   }));
 
