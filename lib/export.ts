@@ -3,7 +3,7 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import type { Clip, Word, Subtitle, SubtitleStyle } from "@/context/EditorContext";
-import { generateSrt } from "./subtitleExport";
+import { generateSrt, generateAss } from "./subtitleExport";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,18 +22,6 @@ export interface ExportResult {
 
 const ST_CDN = "https://unpkg.com/@ffmpeg/core-st@0.12.6/dist/esm";
 
-// ─── Color helpers ────────────────────────────────────────────────────────────
-
-/** Convert CSS hex "#RRGGBB" → ASS "&H00BBGGRR&" little-endian hex. */
-function hexToAss(hex: string): string {
-  const clean = hex.replace("#", "");
-  if (clean.length !== 6) return "00FFFFFF";
-  const r = clean.slice(0, 2);
-  const g = clean.slice(2, 4);
-  const b = clean.slice(4, 6);
-  return `00${b}${g}${r}`.toUpperCase();
-}
-
 // ─── Main export function ─────────────────────────────────────────────────────
 
 export async function exportVideo(
@@ -43,6 +31,7 @@ export async function exportVideo(
   subtitles: Subtitle[],
   subtitleStyle: SubtitleStyle,
   onProgress: (p: ExportProgress) => void,
+  musicUrl?: string,
 ): Promise<ExportResult> {
 
   // ── 1. Load FFmpeg WASM ────────────────────────────────────────────────────
@@ -55,7 +44,7 @@ export async function exportVideo(
   });
 
   ffmpeg.on("progress", ({ progress }) => {
-    const pct = Math.round(15 + progress * 80);
+    const pct = Math.round(15 + progress * 78);
     onProgress({ phase: "encoding", percent: pct, message: `מרנדר… ${pct}%` });
   });
 
@@ -64,65 +53,69 @@ export async function exportVideo(
   await ffmpeg.writeFile("input.mp4", await fetchFile(file));
 
   // ── 3. Fetch & write Hebrew font for libass ────────────────────────────────
-  // Heebo Bold TTF from Google Fonts GitHub mirror — needed for correct Hebrew
-  // character rendering and RTL layout inside FFmpeg's libass engine.
   onProgress({ phase: "writing", percent: 9, message: "טוען פונט עברי…" });
-  let fontName = "sans-serif"; // fallback if fetch fails
   try {
     const fontResp = await fetch(
       "https://raw.githubusercontent.com/google/fonts/main/ofl/heebo/static/Heebo-Bold.ttf",
     );
     if (fontResp.ok) {
-      const fontBytes = new Uint8Array(await fontResp.arrayBuffer());
-      await ffmpeg.writeFile("Heebo-Bold.ttf", fontBytes);
-      fontName = "Heebo";
+      await ffmpeg.writeFile("Heebo-Bold.ttf", new Uint8Array(await fontResp.arrayBuffer()));
     }
-  } catch {
-    // Font fetch failed — libass will use its built-in fallback
+  } catch { /* libass built-in fallback */ }
+
+  // ── 4. Fetch & write background music ─────────────────────────────────────
+  let hasMusicInput = false;
+  if (musicUrl) {
+    onProgress({ phase: "writing", percent: 11, message: "טוען מוזיקת רקע…" });
+    try {
+      const musicResp = await fetch(musicUrl);
+      if (musicResp.ok) {
+        await ffmpeg.writeFile("bgmusic.mp3", new Uint8Array(await musicResp.arrayBuffer()));
+        hasMusicInput = true;
+      }
+    } catch { /* proceed without music */ }
   }
 
-  // ── 4. Generate & write ASS subtitles ─────────────────────────────────────
+  // ── 5. Generate subtitles (ASS for karaoke word highlight + SRT for DL) ───
   const sorted = [...clips].sort((a, b) => a.startSec - b.startSec);
   const srtContent = generateSrt(transcript, subtitles, sorted);
-  const hasSubs = srtContent.trim().length > 0;
+
+  const assContent = generateAss(transcript, subtitles, sorted, subtitleStyle);
+  const hasSubs    = assContent.trim().length > 0;
 
   if (hasSubs) {
-    await ffmpeg.writeFile("subs.srt", new TextEncoder().encode(srtContent));
+    await ffmpeg.writeFile("subs.ass", new TextEncoder().encode(assContent));
   }
 
-  // ── 4. Build FFmpeg arguments ──────────────────────────────────────────────
-  onProgress({ phase: "encoding", percent: 12, message: "בונה פקודת עריכה…" });
+  // ── 6. Compute virtual timeline duration (for audio fade-out) ─────────────
+  const virtualDuration = sorted.reduce((sum, c) => sum + (c.endSec - c.startSec), 0);
+  const fadeStart = Math.max(0, virtualDuration - 0.5).toFixed(3);
+
+  // ── 7. Build FFmpeg arguments ──────────────────────────────────────────────
+  onProgress({ phase: "encoding", percent: 13, message: "בונה פקודת עריכה…" });
 
   const args: string[] = ["-i", "input.mp4"];
+  if (hasMusicInput) args.push("-i", "bgmusic.mp3");
 
   // Detect whether auto-cut created actual gaps between clips
   const hasGaps = sorted.length > 1 &&
     sorted.some((c, i) => i > 0 && c.startSec > sorted[i - 1].endSec + 0.15);
 
-  // ASS force_style for subtitle burn-in.
-  // - FontName references the TTF we wrote to the WASM FS (or falls back to system).
-  // - MarginV is measured from the bottom of the frame in pixels.
-  //   We approximate using a 720-line baseline; for 9:16 (1080×1920) the
-  //   proportions still hold because MarginV scales with video height in libass.
-  // - Alignment=2 = bottom-center; the user's verticalPos is reflected by MarginV.
-  const marginV = Math.max(5, Math.round(720 * (1 - subtitleStyle.verticalPos / 100) - 30));
-  const primaryHex = hexToAss(
-    subtitleStyle.textColor.startsWith("rgba") ? "#ffffff" : subtitleStyle.textColor,
-  );
-  const assStyle = [
-    `FontName=${fontName}`,
-    "FontSize=22",
-    `PrimaryColour=&H${primaryHex}&`,
-    `OutlineColour=&H${hexToAss(subtitleStyle.shadowColor)}&`,
-    "Outline=2",
-    "Bold=1",
-    "Alignment=2",
-    `MarginV=${marginV}`,
-  ].join(",");
+  // subtitle filter — fontsdir=. lets libass find Heebo-Bold.ttf
+  const subFilter = `ass=subs.ass:fontsdir=.`;
 
-  // subtitle filter string: fontsdir=. tells libass to search the WASM working
-  // directory for font files (where we wrote Heebo-Bold.ttf).
-  const subFilter = `subtitles=subs.srt:fontsdir=.:force_style='${assStyle}'`;
+  // music audio filter: loop → volume 12% → mix with video audio → fade out
+  const musicFilter = hasMusicInput
+    ? `[${hasGaps ? "ac" : "0:a"}][1:a]` +
+      `amix=inputs=2:duration=first:dropout_transition=2,` +
+      `afade=t=out:st=${fadeStart}:d=0.5[aout]`
+    : "";
+
+  // Simplified: build a single music-only filter (input 1 looped + volume)
+  // then mix: [origAudio][music]amix...
+  const musicSetup = hasMusicInput
+    ? `[1:a]aloop=loop=-1:size=2000000000,volume=0.12[bgm];`
+    : "";
 
   if (hasGaps) {
     // ── Trim each talking segment, then concat ──────────────────────────────
@@ -142,15 +135,52 @@ export async function exportVideo(
 
     if (hasSubs) {
       fcParts.push(`[vc]${subFilter}[vout]`);
-      args.push("-filter_complex", fcParts.join(";"), "-map", "[vout]", "-map", "[ac]");
+    }
+
+    if (hasMusicInput) {
+      fcParts.push(`${musicSetup}[ac][bgm]amix=inputs=2:duration=first:dropout_transition=2,afade=t=out:st=${fadeStart}:d=0.5[aout]`);
+      args.push(
+        "-filter_complex", fcParts.join(";"),
+        "-map", hasSubs ? "[vout]" : "[vc]",
+        "-map", "[aout]",
+      );
     } else {
-      args.push("-filter_complex", fcParts.join(";"), "-map", "[vc]", "-map", "[ac]");
+      // No music — add simple audio fade-out
+      fcParts.push(`[ac]afade=t=out:st=${fadeStart}:d=0.5[aout]`);
+      args.push(
+        "-filter_complex", fcParts.join(";"),
+        "-map", hasSubs ? "[vout]" : "[vc]",
+        "-map", "[aout]",
+      );
     }
 
   } else {
-    // ── Full video, just burn subtitles if present ──────────────────────────
-    if (hasSubs) {
-      args.push("-vf", subFilter);
+    // ── Full video (no trim/concat needed) ─────────────────────────────────
+    if (hasMusicInput) {
+      // Need filter_complex for both subtitle burn and audio mix
+      const fc: string[] = [];
+      if (hasSubs) fc.push(`[0:v]${subFilter}[vout]`);
+      fc.push(`${musicSetup}[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2,afade=t=out:st=${fadeStart}:d=0.5[aout]`);
+      args.push(
+        "-filter_complex", fc.join(";"),
+        "-map", hasSubs ? "[vout]" : "0:v",
+        "-map", "[aout]",
+      );
+    } else {
+      // Simple: just burn subs + audio fade
+      if (hasSubs) {
+        args.push(
+          "-filter_complex", `[0:v]${subFilter}[vout];[0:a]afade=t=out:st=${fadeStart}:d=0.5[aout]`,
+          "-map", "[vout]",
+          "-map", "[aout]",
+        );
+      } else {
+        args.push(
+          "-filter_complex", `[0:a]afade=t=out:st=${fadeStart}:d=0.5[aout]`,
+          "-map", "0:v",
+          "-map", "[aout]",
+        );
+      }
     }
   }
 
@@ -161,10 +191,10 @@ export async function exportVideo(
     "output.mp4",
   );
 
-  // ── 5. Run FFmpeg ──────────────────────────────────────────────────────────
+  // ── 8. Run FFmpeg ──────────────────────────────────────────────────────────
   await ffmpeg.exec(args);
 
-  // ── 6. Package result ──────────────────────────────────────────────────────
+  // ── 9. Package result ──────────────────────────────────────────────────────
   const data = await ffmpeg.readFile("output.mp4") as Uint8Array;
   const blob = new Blob([data.buffer as ArrayBuffer], { type: "video/mp4" });
 

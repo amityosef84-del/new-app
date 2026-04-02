@@ -4,9 +4,9 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlignRight, Music, Sparkles, Palette,
-  Volume2, VolumeX, Check, Zap,
+  Volume2, VolumeX, Check, Zap, X,
 } from "lucide-react";
-import { useEditor, MUSIC_TRACKS } from "@/context/EditorContext";
+import { useEditor, MUSIC_TRACKS, type MusicTrack } from "@/context/EditorContext";
 
 interface Props {
   currentTime: number;
@@ -29,9 +29,24 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
   const { state, dispatch } = useEditor();
   const { subtitles, subtitleStyle, selectedTrack, videoVolume, musicVolume } = state;
 
-  const [activeTab,    setActiveTab]    = useState<Tab>("subtitles");
-  const [editingSubId, setEditingSubId] = useState<string | null>(null);
-  const [musicEnabled, setMusicEnabled] = useState(true);
+  const [activeTab,       setActiveTab]       = useState<Tab>("subtitles");
+  const [editingSubId,    setEditingSubId]    = useState<string | null>(null);
+  const [musicEnabled,    setMusicEnabled]    = useState(true);
+  const [musicCategory,   setMusicCategory]   = useState<"all" | MusicTrack["category"]>("all");
+
+  type MusicCat = "all" | MusicTrack["category"];
+  const MUSIC_CATS: { id: MusicCat; label: string }[] = [
+    { id: "all",        label: "הכל"    },
+    { id: "phonk",      label: "Phonk"  },
+    { id: "motivation", label: "Power"  },
+    { id: "chill",      label: "Chill"  },
+    { id: "sales",      label: "Sales"  },
+  ];
+  const filteredTracks = musicCategory === "all"
+    ? MUSIC_TRACKS
+    : MUSIC_TRACKS.filter(t => t.category === musicCategory);
+
+  const activeTrack = MUSIC_TRACKS.find(t => t.id === selectedTrack) ?? null;
 
   const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: "subtitles", label: "כתוביות", icon: AlignRight },
@@ -293,6 +308,61 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
               exit={{ opacity: 0, y: -6 }}
               className="flex flex-col gap-3"
             >
+              {/* ── Currently-selected track banner ── */}
+              {activeTrack ? (
+                <div
+                  className="flex items-center gap-2.5 p-3 rounded-xl"
+                  style={{
+                    background: "linear-gradient(135deg,rgba(139,92,246,0.15),rgba(59,130,246,0.10))",
+                    border: "1px solid rgba(139,92,246,0.35)",
+                  }}
+                >
+                  {/* Animated waveform */}
+                  <div className="flex items-end gap-[1.5px] h-7 w-12 shrink-0">
+                    {activeTrack.waveform.slice(0, 10).map((h, i) => (
+                      isPlaying ? (
+                        <motion.div
+                          key={i}
+                          className="flex-1 rounded-t"
+                          style={{ background: "rgba(167,139,250,0.8)" }}
+                          animate={{ height: [`${h * 0.28}px`, `${Math.min(h * 0.5, 28)}px`, `${h * 0.28}px`] }}
+                          transition={{ duration: 0.4 + i * 0.05, repeat: Infinity, ease: "easeInOut" }}
+                        />
+                      ) : (
+                        <div
+                          key={i}
+                          className="flex-1 rounded-t"
+                          style={{ height: `${h * 0.28}px`, background: "rgba(167,139,250,0.5)" }}
+                        />
+                      )
+                    ))}
+                  </div>
+
+                  <div className="flex-1 min-w-0 text-right">
+                    <p className="text-white/85 text-xs font-semibold truncate">{activeTrack.name}</p>
+                    <p className="text-white/35 text-[10px]">{activeTrack.genre} · {activeTrack.bpm} BPM</p>
+                  </div>
+
+                  {/* × deselect */}
+                  <button
+                    onClick={() => dispatch({ type: "SET_TRACK", track: "" })}
+                    className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all hover:bg-white/10"
+                    title="הסר מוזיקה"
+                    style={{ color: "rgba(255,255,255,0.4)" }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <div
+                  className="flex items-center gap-2 p-3 rounded-xl"
+                  style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)" }}
+                >
+                  <VolumeX size={14} className="text-white/25 shrink-0" />
+                  <p className="text-white/30 text-xs">לא נבחרה מוזיקה</p>
+                </div>
+              )}
+
               {/* Music on/off + auto-duck badge */}
               <div
                 className="flex items-center justify-between p-3 rounded-xl"
@@ -309,18 +379,14 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
                   )}
                   <div>
                     <p className="text-white/70 text-xs font-medium">מוזיקת רקע</p>
-                    <p className="text-white/30 text-[10px] flex items-center gap-1">
-                      {musicEnabled ? (
-                        <>
-                          <span
-                            className="px-1.5 py-0.5 rounded-full text-[9px] font-mono"
-                            style={{ background: "rgba(34,197,94,.15)", color: "#86efac", border: "1px solid rgba(34,197,94,.25)" }}
-                          >
-                            Auto-Duck 12%
-                          </span>
-                        </>
-                      ) : "כבוי"}
-                    </p>
+                    {musicEnabled && (
+                      <span
+                        className="px-1.5 py-0.5 rounded-full text-[9px] font-mono"
+                        style={{ background: "rgba(34,197,94,.15)", color: "#86efac", border: "1px solid rgba(34,197,94,.25)" }}
+                      >
+                        Auto-Duck 12%
+                      </span>
+                    )}
                   </div>
                 </div>
                 <button
@@ -396,14 +462,32 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
                 </div>
               </div>
 
-              {/* Track picker */}
+              {/* ── Category filter tabs ── */}
+              <div className="flex gap-1">
+                {MUSIC_CATS.map(({ id, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => setMusicCategory(id)}
+                    className="flex-1 py-1 rounded-lg text-[10px] font-medium transition-all"
+                    style={
+                      musicCategory === id
+                        ? { background: "rgba(139,92,246,0.25)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.4)" }
+                        : { background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.3)", border: "1px solid rgba(255,255,255,0.07)" }
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── Track list with waveform bars ── */}
               <div className="flex flex-col gap-1.5">
-                {MUSIC_TRACKS.map((track) => {
+                {filteredTracks.map((track) => {
                   const active = selectedTrack === track.id;
                   return (
                     <button
                       key={track.id}
-                      onClick={() => dispatch({ type: "SET_TRACK", track: track.id })}
+                      onClick={() => dispatch({ type: "SET_TRACK", track: active ? "" : track.id })}
                       className="flex items-center gap-2.5 p-2.5 rounded-xl text-right transition-all"
                       style={{
                         background: active
@@ -414,36 +498,39 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
                           : "1px solid rgba(255,255,255,0.07)",
                       }}
                     >
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                        style={{
-                          background: active
-                            ? "rgba(139,92,246,0.25)"
-                            : "rgba(255,255,255,0.05)",
-                        }}
-                      >
-                        {active && isPlaying ? (
-                          <div className="flex gap-0.5 items-end h-4">
-                            {[0, 1, 2].map((i) => (
-                              <motion.div
-                                key={i}
-                                className="w-0.5 rounded-full bg-purple-400"
-                                animate={{ height: ["4px", "14px", "4px"] }}
-                                transition={{
-                                  duration: 0.5,
-                                  repeat: Infinity,
-                                  delay: i * 0.13,
-                                }}
-                              />
-                            ))}
-                          </div>
-                        ) : (
-                          <Music
-                            size={13}
-                            style={{ color: active ? "#a78bfa" : "rgba(255,255,255,0.25)" }}
-                          />
-                        )}
+                      {/* Waveform preview */}
+                      <div className="flex items-end gap-[1px] h-7 w-10 shrink-0">
+                        {track.waveform.slice(0, 14).map((h, i) => (
+                          active && isPlaying ? (
+                            <motion.div
+                              key={i}
+                              className="flex-1 rounded-t"
+                              style={{
+                                background: active ? "rgba(167,139,250,0.75)" : "rgba(255,255,255,0.18)",
+                              }}
+                              animate={{
+                                height: [`${h * 0.27}px`, `${Math.min(h * 0.5, 27)}px`, `${h * 0.27}px`],
+                              }}
+                              transition={{
+                                duration: 0.35 + i * 0.04,
+                                repeat: Infinity,
+                                ease: "easeInOut",
+                                delay: i * 0.02,
+                              }}
+                            />
+                          ) : (
+                            <div
+                              key={i}
+                              className="flex-1 rounded-t"
+                              style={{
+                                height: `${h * 0.27}px`,
+                                background: active ? "rgba(167,139,250,0.6)" : "rgba(255,255,255,0.15)",
+                              }}
+                            />
+                          )
+                        ))}
                       </div>
+
                       <div className="flex-1 text-right min-w-0">
                         <p
                           className="text-xs font-medium truncate"
@@ -455,6 +542,7 @@ export default function SidebarPanel({ currentTime, isPlaying, onSeek }: Props) 
                           {track.genre} · {track.bpm} BPM
                         </p>
                       </div>
+
                       {active && (
                         <motion.div
                           initial={{ scale: 0 }}

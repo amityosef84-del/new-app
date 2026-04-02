@@ -172,6 +172,10 @@ export default function EditorShell({ onBack, onNext }: Props) {
   }, [selectedTrack, audioUnlocked]);
 
   function startScheduler(ctx: AudioContext, dest: AudioNode, trackId: string) {
+    if (!trackId) {
+      if (schedulerRef.current) clearInterval(schedulerRef.current);
+      return;
+    }
     const track = MUSIC_TRACKS.find(t => t.id === trackId) ?? MUSIC_TRACKS[0];
     const spb = 60 / track.bpm;
     const s16 = spb / 4;
@@ -298,12 +302,14 @@ export default function EditorShell({ onBack, onNext }: Props) {
   }, [file, duration, autoCutRunning, dispatch]);
 
   const handleExport = useCallback(async () => {
-    const { file, clips, transcript, subtitles, subtitleStyle } = stateRef.current;
+    const { file, clips, transcript, subtitles, subtitleStyle, selectedTrack } = stateRef.current;
     if (!file || exportProgress?.phase === "loading" || exportProgress?.phase === "encoding") return;
     exportResultRef.current = null;
     setExportProgress({ phase: "loading", percent: 0, message: "מתחיל…" });
     try {
-      const result = await exportVideo(file, clips, transcript, subtitles, subtitleStyle, setExportProgress);
+      const track = selectedTrack ? MUSIC_TRACKS.find(t => t.id === selectedTrack) : undefined;
+      const musicUrl = track?.url;
+      const result = await exportVideo(file, clips, transcript, subtitles, subtitleStyle, setExportProgress, musicUrl);
       exportResultRef.current = result;
     } catch (err) {
       console.error("[Export]", err);

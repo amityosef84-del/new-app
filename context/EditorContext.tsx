@@ -84,12 +84,62 @@ export type EditorAction =
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 
-export const MUSIC_TRACKS = [
-  { id: "t1", name: "Viral / Upbeat",    genre: "Lo-Fi",    bpm: 85  },
-  { id: "t2", name: "Professional",      genre: "Cinematic",bpm: 128 },
-  { id: "t3", name: "Upbeat Pop",        genre: "Pop",      bpm: 110 },
-  { id: "t4", name: "Chill / Minimal",   genre: "Ambient",  bpm: 70  },
-] as const;
+export interface MusicTrack {
+  id: string;
+  name: string;
+  genre: string;
+  bpm: number;
+  category: "phonk" | "motivation" | "chill" | "sales";
+  url: string;
+  waveform: number[]; // 20 amplitude values 0–100
+}
+
+export const MUSIC_TRACKS: MusicTrack[] = [
+  // ── Phonk / High Energy ──────────────────────────────────────────────────
+  {
+    id: "t1", name: "Dark Phonk", genre: "Phonk", bpm: 140, category: "phonk",
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+    waveform: [85,45,92,28,88,55,95,22,90,60,88,32,92,50,85,38,90,55,80,95],
+  },
+  {
+    id: "t2", name: "Trap Energy", genre: "Trap", bpm: 150, category: "phonk",
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3",
+    waveform: [90,28,88,45,95,22,82,60,92,32,88,50,90,38,85,55,92,28,85,95],
+  },
+  // ── Motivation / Epic ─────────────────────────────────────────────────────
+  {
+    id: "t3", name: "Rise Up", genre: "Cinematic", bpm: 128, category: "motivation",
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+    waveform: [70,75,80,78,85,82,88,86,90,88,92,85,88,82,85,80,78,82,85,88],
+  },
+  {
+    id: "t4", name: "Power Move", genre: "Epic", bpm: 135, category: "motivation",
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3",
+    waveform: [65,72,78,82,88,85,90,88,92,88,85,82,88,85,90,88,85,82,88,92],
+  },
+  // ── Chill / Lo-Fi ────────────────────────────────────────────────────────
+  {
+    id: "t5", name: "Lo-Fi Afternoon", genre: "Lo-Fi", bpm: 85, category: "chill",
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3",
+    waveform: [40,45,38,50,42,48,35,52,45,38,50,42,45,40,38,52,45,40,48,42],
+  },
+  {
+    id: "t6", name: "Podcast Chill", genre: "Ambient", bpm: 72, category: "chill",
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-17.mp3",
+    waveform: [30,35,38,32,40,35,28,42,35,30,38,32,35,30,38,32,40,35,28,42],
+  },
+  // ── Corporate / Sales ────────────────────────────────────────────────────
+  {
+    id: "t7", name: "Corporate Drive", genre: "Corporate", bpm: 120, category: "sales",
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3",
+    waveform: [60,65,68,62,70,65,58,72,65,60,68,62,65,60,68,62,70,65,58,72],
+  },
+  {
+    id: "t8", name: "Sales Momentum", genre: "Electronic", bpm: 125, category: "sales",
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3",
+    waveform: [65,70,72,68,75,70,62,78,70,65,72,68,70,65,72,68,75,70,62,78],
+  },
+];
 
 export const CLIP_COLORS = [
   "#3b82f6", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444",

@@ -1,4 +1,4 @@
-import type { Word, Subtitle, Clip } from "@/context/EditorContext";
+import type { Word, Subtitle, Clip, SubtitleStyle } from "@/context/EditorContext";
 
 // ─── Time formatting ──────────────────────────────────────────────────────────
 
@@ -11,6 +11,33 @@ function srtTime(sec: number): string {
   const s  = Math.floor(sec % 60);
   const ms = Math.round((sec % 1) * 1000);
   return `${p2(h)}:${p2(m)}:${p2(s)},${p3(ms)}`;
+}
+
+/** ASS time format h:mm:ss.cs */
+function assTime(sec: number): string {
+  const h  = Math.floor(sec / 3600);
+  const m  = Math.floor((sec % 3600) / 60);
+  const s  = Math.floor(sec % 60);
+  const cs = Math.round((sec % 1) * 100);
+  return `${h}:${p2(m)}:${p2(s)}.${p2(cs)}`;
+}
+
+/**
+ * Convert CSS colour string (#RRGGBB, rgba(...)) to
+ * ASS hex "00BBGGRR" (little-endian BGR, no ampersands).
+ */
+function cssToAssHex(css: string): string {
+  if (css.startsWith("rgba") || css.startsWith("rgb")) {
+    const m = css.match(/\d+/g);
+    if (!m || m.length < 3) return "00FFFFFF";
+    const r = parseInt(m[0]).toString(16).padStart(2, "0");
+    const g = parseInt(m[1]).toString(16).padStart(2, "0");
+    const b = parseInt(m[2]).toString(16).padStart(2, "0");
+    return `00${b}${g}${r}`.toUpperCase();
+  }
+  const clean = css.replace("#", "");
+  if (clean.length !== 6) return "00FFFFFF";
+  return `00${clean.slice(4, 6)}${clean.slice(2, 4)}${clean.slice(0, 2)}`.toUpperCase();
 }
 
 // ─── Timeline remapping ───────────────────────────────────────────────────────
@@ -76,4 +103,88 @@ export function generateSrt(
   }
 
   return srt;
+}
+
+// ─── ASS generator (word-level karaoke highlighting) ─────────────────────────
+
+const WORDS_PER_LINE_ASS = 4;
+
+/**
+ * Generates an ASS subtitle file with per-word karaoke highlighting.
+ *
+ * Primary colour  = subtitleStyle.activeColor  (the word currently being spoken)
+ * Secondary colour = subtitleStyle.textColor   (words not yet reached)
+ *
+ * libass `\k<cs>` advances the karaoke highlight word by word. Each word
+ * becomes primary colour for its spoken duration, then stays primary; upcoming
+ * words show in secondary (white). This gives a clean "current word = yellow"
+ * look on the exported video.
+ */
+export function generateAss(
+  transcript: Word[],
+  subtitles: Subtitle[],
+  clips: Clip[],
+  subtitleStyle: SubtitleStyle,
+): string {
+  const sorted = [...clips].sort((a, b) => a.startSec - b.startSec);
+
+  const primaryHex   = cssToAssHex(subtitleStyle.activeColor);
+  const secondaryHex = cssToAssHex(
+    subtitleStyle.textColor.startsWith("rgba") ? "#ffffff" : subtitleStyle.textColor,
+  );
+  const outlineHex = cssToAssHex(subtitleStyle.shadowColor);
+  const marginV    = Math.max(5, Math.round(720 * (1 - subtitleStyle.verticalPos / 100) - 30));
+
+  const header = [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    "PlayResX: 1080",
+    "PlayResY: 1920",
+    "WrapStyle: 0",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    `Style: Default,Heebo,52,&H${primaryHex}&,&H${secondaryHex}&,&H${outlineHex}&,&H00000000&,-1,0,0,0,100,100,0,0,1,3,0,2,20,20,${marginV},1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+  ].join("\n");
+
+  const events: string[] = [];
+
+  if (transcript.length > 0) {
+    // ── Word-level karaoke from transcript ─────────────────────────────────
+    for (let i = 0; i < transcript.length; i += WORDS_PER_LINE_ASS) {
+      const chunk = transcript.slice(i, i + WORDS_PER_LINE_ASS);
+      const lineStart = remapTime(chunk[0].start, sorted);
+      const lineEnd   = remapTime(chunk[chunk.length - 1].end, sorted);
+      if (lineStart < 0 || lineEnd < 0 || lineEnd <= lineStart + 0.01) continue;
+
+      let kText = "";
+      for (const word of chunk) {
+        const wStart = remapTime(word.start, sorted);
+        const wEnd   = remapTime(word.end,   sorted);
+        if (wStart < 0 || wEnd < 0) continue;
+        // \k<cs> = duration of this syllable in centiseconds
+        const cs = Math.max(1, Math.round((wEnd - wStart) * 100));
+        kText += `{\\k${cs}}${word.text} `;
+      }
+
+      events.push(
+        `Dialogue: 0,${assTime(lineStart)},${assTime(lineEnd)},Default,,0,0,0,,${kText.trim()}`,
+      );
+    }
+  } else {
+    // ── Fallback: one event per subtitle line, no karaoke ──────────────────
+    for (const sub of subtitles) {
+      const vs = remapTime(sub.startSec, sorted);
+      const ve = remapTime(sub.endSec,   sorted);
+      if (vs < 0 || ve < 0 || ve <= vs + 0.01) continue;
+      events.push(
+        `Dialogue: 0,${assTime(vs)},${assTime(ve)},Default,,0,0,0,,${sub.text}`,
+      );
+    }
+  }
+
+  return header + "\n" + events.join("\n");
 }
